@@ -1,7 +1,7 @@
 import SwiftDiagnostics
 import SwiftSyntax
 
-public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt? {
+public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt {
     var updatedClassDecl = classDecl
 
     if classDecl.modifiers.isEmpty {
@@ -30,7 +30,7 @@ public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: Macr
     )
 }
 
-public func makeAddMainActorFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt? {
+public func makeAddMainActorFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt {
     let mainActorAttribute = AttributeSyntax(
         atSign: .atSignToken(),
         attributeName: IdentifierTypeSyntax(name: .identifier("MainActor")),

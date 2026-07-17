@@ -22,8 +22,7 @@ public func hasStoredLetProperty(
                 return false
             }
 
-            let type = typeAnnotation.type.trimmedDescription
-            return type == typeName || type.hasSuffix(".\(typeName)")
+            return typeMatches(typeAnnotation.type, expectedTypeName: typeName)
         }
     }
 }

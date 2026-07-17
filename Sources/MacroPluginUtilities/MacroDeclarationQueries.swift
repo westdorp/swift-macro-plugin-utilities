@@ -28,7 +28,8 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
 
 /// Renders a type in the canonical spelling used by expected-type tables:
 /// optionals as `?`, `any` markers dropped, single-element parentheses
-/// unwrapped, whitespace removed.
+/// unwrapped, whitespace removed. `some` remains distinct because opaque
+/// types are not existential spellings.
 private func normalizedTypeText(_ type: TypeSyntax) -> String {
     if let optionalType = type.as(OptionalTypeSyntax.self) {
         return normalizedTypeText(optionalType.wrappedType) + "?"
