@@ -58,6 +58,59 @@ visibility, not an endorsed authoring path.
 All other `0.1.0` APIs remain source-compatible; the remaining `0.2.0`
 utilities are additive.
 
+## Playback vendored-module users
+
+### Adopt the canonical package
+
+Add the exact package dependency:
+
+```swift
+.package(
+    url: "https://github.com/westdorp/swift-macro-plugin-utilities.git",
+    exact: "0.2.0"
+)
+```
+
+Add the `MacroPluginUtilities` product to each consuming macro target. Delete
+the local utility target, its six vendored source files, and its utility test
+target only after their unique tests are present upstream.
+
+### Remove optional fix-it adaptation
+
+Replace:
+
+```swift
+[makeAddFinalFixIt(...)].compactMap { $0 }
+```
+
+with:
+
+```swift
+[makeAddFinalFixIt(...)]
+```
+
+Apply the same rewrite to `makeAddMainActorFixIt`. Playback currently has four
+such adaptations across its validator and machine validation.
+
+### Keep diagnostic IDs consumer-owned
+
+Preserve consumer-owned typed diagnostic enums and pass their cases directly
+to the generic context convenience. Do not move playback-specific ID cases
+into `MacroPluginUtilities`.
+
+### Account for inherited behavior changes
+
+- Stored-let types use full normalization.
+- Detached and nested `Sendable` lookup uses lexical qualification.
+- Extensions inside executable bodies and `#if` blocks are excluded.
+- Class call sites remain source-compatible with the generalized
+  declaration-group parameter.
+
+### Remove redundant diagnostic emitters
+
+Delete any now-identical local diagnostic emitter or helper once direct context
+calls preserve its domain, ID, WHAT/WHY/HOW fragments, and fix-its.
+
 # Migrating to 0.1.0
 
 `0.1.0` establishes `swift-macro-plugin-utilities` as the canonical package

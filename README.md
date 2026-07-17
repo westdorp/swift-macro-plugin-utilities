@@ -38,11 +38,23 @@ diagnostics remain visible without terminating the compiler plugin.
 
 The package provides:
 
-- exact modifier and attribute queries;
-- normalized syntactic type matching;
-- stored-property and initializer queries;
-- deterministic `final` and `@MainActor` fix-its;
-- direct and visible-extension `Sendable` discovery.
+- declaration queries: `hasModifier`, `hasAttribute`,
+  `attributeNameMatches`, `typeMatches`, `isInstanceVariable`,
+  `existingMemberNames`, `renderEnumCasePattern`, and `enumCaseLabel`;
+- property queries: `hasStoredLetProperty`,
+  `unsupportedUninitializedStoredProperties`, `hasConflictingInitializer`,
+  and the `InlineInitializedStoredProperty` projection returned by
+  `inlineInitializedStoredProperty`;
+- deterministic fix-its: `makeAddFinalFixIt`, `makeAddMainActorFixIt`, and
+  `makeRemoveInitializerFixIt`;
+- `Sendable` utilities: `hasSendableConformance`, `sourceFile(containing:)`,
+  `inheritedTypesContainSendable`, and `sendableExtensionIfNeeded`;
+- structured diagnostics: `MacroDiagnosticMessage`, `MacroFixItMessage`,
+  `MacroDiagnosticText.compose`, and both `MacroExpansionContext.diagnose`
+  overloads;
+- attached-class validation: `MacroAttachedClassRequirements` and its
+  `DiagnosticIDs`, `MacroAttachedClassRequirement`, and
+  `MacroAttachedClassValidator`.
 
 Matching is intentionally syntactic. It does not resolve imports, type aliases,
 overloads, or compiler-known type equivalence. Type matching normalizes optional
@@ -76,17 +88,18 @@ make build
 The manifest declares macOS 10.15, matching SwiftSyntax 602's dependency
 floor. This is a compiler-host build constraint: macro plugins do not execute
 in downstream app processes, and the declaration does not set an app deployment
-target. The `0.1.0` package gate verifies this host configuration on macOS 26.
+target. The package gate verifies this host configuration on macOS 26.
 
 ## Provenance
 
 This repository is the canonical, living home of utilities originally frozen
-from the PlaybackStateMachineMacros package at revision
+from the `PlaybackStateMachineMacros` package in the
+`swift-playback-machine-macros-private` repository at revision
 `214443b8fb0d1ab228ab8b79d6c17d4f3497a7b6`. The frozen revision records the
 extraction origin; development continues here.
 
 ## Compatibility
 
-The `0.1.x` patch line preserves source compatibility. Before `1.0`, a minor
-release such as `0.2.0` may include breaking API changes and will provide
+Patch releases preserve source compatibility within each minor line. Before
+`1.0`, a new minor release may include breaking API changes and will provide
 migration notes.
