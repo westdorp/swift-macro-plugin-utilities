@@ -1,5 +1,6 @@
 import SwiftSyntax
 
+/// Returns whether a class declares a stored instance `let` with the expected name and normalized type.
 public func hasStoredLetProperty(
     named propertyName: String,
     typeNamed typeName: String,
@@ -22,12 +23,12 @@ public func hasStoredLetProperty(
                 return false
             }
 
-            let type = typeAnnotation.type.trimmedDescription
-            return type == typeName || type.hasSuffix(".\(typeName)")
+            return typeMatches(typeAnnotation.type, expectedTypeName: typeName)
         }
     }
 }
 
+/// Returns unmanaged, uninitialized stored instance-property names in source order.
 public func unsupportedUninitializedStoredProperties(
     in classDecl: ClassDeclSyntax,
     excluding managedPropertyNames: Set<String>
@@ -55,6 +56,7 @@ public func unsupportedUninitializedStoredProperties(
     }
 }
 
+/// Returns whether a class has an initializer with exactly one matching labelled parameter.
 public func hasConflictingInitializer(
     parameterLabel: String,
     parameterType: String,

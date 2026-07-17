@@ -1,11 +1,13 @@
 import SwiftSyntax
 
+/// Returns whether a modifier list contains the exact modifier token text.
 public func hasModifier(named name: String, in modifiers: DeclModifierListSyntax) -> Bool {
     modifiers.contains { modifier in
         modifier.name.text == name
     }
 }
 
+/// Returns whether an attribute has the expected unqualified or qualified name.
 public func hasAttribute(named name: String, in attributes: AttributeListSyntax) -> Bool {
     attributes.contains { element in
         guard let attribute = element.as(AttributeSyntax.self) else {
@@ -16,11 +18,13 @@ public func hasAttribute(named name: String, in attributes: AttributeListSyntax)
     }
 }
 
+/// Matches an attribute's complete spelling or final qualified component.
 public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String) -> Bool {
     let attributeName = attribute.attributeName.trimmedDescription
     return attributeName == expected || attributeName.hasSuffix(".\(expected)")
 }
 
+/// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
     let normalized = normalizedTypeText(type)
     return normalized == expectedTypeName || normalized.hasSuffix(".\(expectedTypeName)")
@@ -28,7 +32,8 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
 
 /// Renders a type in the canonical spelling used by expected-type tables:
 /// optionals as `?`, `any` markers dropped, single-element parentheses
-/// unwrapped, whitespace removed.
+/// unwrapped, whitespace removed. `some` remains distinct because opaque
+/// types are not existential spellings.
 private func normalizedTypeText(_ type: TypeSyntax) -> String {
     if let optionalType = type.as(OptionalTypeSyntax.self) {
         return normalizedTypeText(optionalType.wrappedType) + "?"
@@ -60,6 +65,7 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
     }
 }
 
+/// Returns whether a variable declaration is an instance property.
 public func isInstanceVariable(_ variableDecl: VariableDeclSyntax) -> Bool {
     !variableDecl.modifiers.contains { modifier in
         let name = modifier.name.text
