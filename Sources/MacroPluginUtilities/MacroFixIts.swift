@@ -1,6 +1,7 @@
 import SwiftDiagnostics
 import SwiftSyntax
 
+/// Creates a one-change fix-it that inserts `final` without losing trivia.
 public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt {
     var updatedClassDecl = classDecl
 
@@ -30,6 +31,7 @@ public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: Macr
     )
 }
 
+/// Creates a one-change fix-it that prepends `@MainActor` to the attributes.
 public func makeAddMainActorFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt {
     let mainActorAttribute = AttributeSyntax(
         atSign: .atSignToken(),

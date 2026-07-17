@@ -1,20 +1,25 @@
 import SwiftDiagnostics
 
+/// An error diagnostic with a caller-defined stable identifier.
 public struct MacroDiagnosticMessage: DiagnosticMessage {
     public let message: String
     public let diagnosticID: MessageID
+    /// The diagnostic is always an error.
     public let severity: DiagnosticSeverity = .error
 
+    /// Creates an error diagnostic in the supplied domain.
     public init(_ message: String, domain: String, id: String) {
         self.message = message
         self.diagnosticID = MessageID(domain: domain, id: id)
     }
 }
 
+/// A fix-it message identified by its domain and display text.
 public struct MacroFixItMessage: FixItMessage {
     public let message: String
     public let fixItID: MessageID
 
+    /// Creates a fix-it message whose text is its identifier.
     public init(_ message: String, domain: String) {
         self.message = message
         self.fixItID = MessageID(domain: domain, id: message)

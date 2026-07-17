@@ -3,7 +3,7 @@
 # Lexical contract: banned tokens are rejected wherever they appear, including comments and string literals.
 
 set -euo pipefail
-export LC_ALL=en_US.UTF-8
+export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -53,9 +53,12 @@ scan_rule() {
   return 0
 }
 
-name_prefix='(^|[^[:alnum:]_])'
-name_suffix='($|[^[:alnum:]_])'
-nonmember_prefix='(^[[:space:]]*|[^.[:space:][:alnum:]_][[:space:]]*|[[:alnum:]_][[:space:]]+)'
+unicode_identifier_bytes="$(printf '\200-\377')"
+identifier_characters="[:alnum:]_${unicode_identifier_bytes}"
+lowercase_identifier_characters="[:lower:]${unicode_identifier_bytes}"
+name_prefix="(^|[^${identifier_characters}])"
+name_suffix="($|[^${identifier_characters}])"
+nonmember_prefix="(^[[:space:]]*|[^.[:space:]${identifier_characters}][[:space:]]*|[${identifier_characters}][[:space:]]+)"
 wait_pattern="${name_prefix}"'Task[[:space:]]*[.][[:space:]]*sleep'"${name_suffix}"
 wait_pattern+="|${name_prefix}"'Thread[[:space:]]*[.][[:space:]]*sleep'"${name_suffix}"
 wait_pattern+="|${nonmember_prefix}"'(sleep|usleep|nanosleep)[[:space:]]*[(]'
@@ -64,8 +67,8 @@ wait_pattern+='|[.][[:space:]]*asyncAfter'"${name_suffix}"
 wait_pattern+="|${name_prefix}"'RunLoop[[:space:]]*[.][[:space:]]*current[[:space:]]*[.][[:space:]]*run'"${name_suffix}"
 wait_pattern+="|${name_prefix}XCTWaiter${name_suffix}"
 wait_pattern+="|${name_prefix}"'expectation[[:space:]]*[(]'
-import_pattern='(^|[^[:alnum:]_])import[[:space:]]+([[:alnum:]_]+[[:space:]]+)?XCTest($|[^[:alnum:]_])'
-test_name_pattern='(^|[^[:alnum:]_])func[[:space:]]+`?test($|[^[:lower:]])'
+import_pattern="(^|[^${identifier_characters}])import[[:space:]]+([[:alnum:]_]+[[:space:]]+)?XCTest($|[^${identifier_characters}])"
+test_name_pattern="(^|[^${identifier_characters}])func[[:space:]]+\`?test($|[^${lowercase_identifier_characters}])"
 
 scan_rule "$wait_pattern" "Found time-based waits in test sources."
 scan_rule "$import_pattern" "Found XCTest import in test sources."

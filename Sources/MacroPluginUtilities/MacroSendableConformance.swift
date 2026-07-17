@@ -1,5 +1,10 @@
 import SwiftSyntax
 
+/// Returns whether visible syntax gives a declaration group `Sendable` conformance.
+///
+/// The query checks direct inheritance and exactly qualified extensions in
+/// source-file or declaration-group containers. For detached declarations,
+/// lexical context supplies enclosing qualification and visible roots.
 public func hasSendableConformance(
     in declaration: some DeclGroupSyntax,
     lexicalContext: [Syntax] = []
@@ -32,6 +37,7 @@ public func hasSendableConformance(
     }
 }
 
+/// Returns the source-file root of an attached syntax node.
 public func sourceFile(containing node: Syntax) -> SourceFileSyntax? {
     var current = node
     while let parent = current.parent {
@@ -41,6 +47,7 @@ public func sourceFile(containing node: Syntax) -> SourceFileSyntax? {
     return current.as(SourceFileSyntax.self)
 }
 
+/// Returns whether inherited-type syntax references `Sendable`.
 public func inheritedTypesContainSendable(_ inheritedTypes: InheritedTypeListSyntax?) -> Bool {
     guard let inheritedTypes else {
         return false
@@ -99,12 +106,10 @@ private func declarationContainerContainsSendableExtension(
         return false
     }
 
-    return declarationGroup.memberBlock.members.contains { member in
-        declarationContainsSendableExtension(
-            member.decl,
-            expectedTypeNameComponents: expectedTypeNameComponents
-        )
-    }
+    return memberBlockContainsSendableExtension(
+        declarationGroup.memberBlock,
+        expectedTypeNameComponents: expectedTypeNameComponents
+    )
 }
 
 private func declarationContainsSendableExtension(
@@ -123,7 +128,17 @@ private func declarationContainsSendableExtension(
         return false
     }
 
-    return declarationGroup.memberBlock.members.contains { member in
+    return memberBlockContainsSendableExtension(
+        declarationGroup.memberBlock,
+        expectedTypeNameComponents: expectedTypeNameComponents
+    )
+}
+
+private func memberBlockContainsSendableExtension(
+    _ memberBlock: MemberBlockSyntax,
+    expectedTypeNameComponents: [String]
+) -> Bool {
+    memberBlock.members.contains { member in
         declarationContainsSendableExtension(
             member.decl,
             expectedTypeNameComponents: expectedTypeNameComponents
