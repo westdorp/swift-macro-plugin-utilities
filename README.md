@@ -72,7 +72,7 @@ target. The `0.1.0` package gate verifies this host configuration on macOS 26.
 ## Provenance
 
 This repository is the canonical, living home of utilities originally frozen
-from `westdorp/PrivatePlaybackStateMachineMacros` revision
+from the PlaybackStateMachineMacros package at revision
 `214443b8fb0d1ab228ab8b79d6c17d4f3497a7b6`. The frozen revision records the
 extraction origin; development continues here.
 
