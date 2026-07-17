@@ -101,6 +101,82 @@ struct MacroDeclarationQueriesTests {
 
         #expect(isInstanceVariable(variable) == expected)
     }
+
+    @Test("Collects every source member namespace")
+    func collectsCompleteMemberNames() throws {
+        let declaration = try #require(
+            Parser.parse(
+                source: """
+                enum Surface {
+                    case idle, active
+                    let primary, secondary: Int
+                    func refresh() {}
+                    enum NestedEnum {}
+                    struct NestedStruct {}
+                    class NestedClass {}
+                    actor NestedActor {}
+                    protocol NestedProtocol {}
+                    typealias Alias = Int
+                }
+                """
+            )
+            .statements.first?.item.as(EnumDeclSyntax.self)
+        )
+
+        #expect(
+            existingMemberNames(in: declaration) == [
+                "idle",
+                "active",
+                "primary",
+                "secondary",
+                "refresh",
+                "NestedEnum",
+                "NestedStruct",
+                "NestedClass",
+                "NestedActor",
+                "NestedProtocol",
+                "Alias",
+            ]
+        )
+    }
+
+    @Test("Renders payload labels through one enum case pattern boundary")
+    func rendersEnumCasePatterns() throws {
+        let declaration = try #require(
+            Parser.parse(
+                source: """
+                enum Event {
+                    case idle
+                    case loaded(String)
+                    case progress(seconds: Double, _ marker: Int)
+                }
+                """
+            )
+            .statements.first?.item.as(EnumDeclSyntax.self)
+        )
+        let elements = declaration.memberBlock.members
+            .compactMap { $0.decl.as(EnumCaseDeclSyntax.self) }
+            .flatMap(\.elements)
+        let parameters = elements.compactMap(\.parameterClause).flatMap(\.parameters)
+
+        let wildcardPatterns = elements.map { element in
+            renderEnumCasePattern(for: element) { _ in "_" }
+        }
+        let bindingPatterns = elements.map { element in
+            renderEnumCasePattern(for: element) { index in "let value\(index)" }
+        }
+
+        #expect(wildcardPatterns == [".idle", ".loaded(_)", ".progress(seconds: _, _)"])
+        #expect(
+            bindingPatterns
+                == [
+                    ".idle",
+                    ".loaded(let value0)",
+                    ".progress(seconds: let value0, let value1)",
+                ]
+        )
+        #expect(parameters.map(enumCaseLabel) == [nil, "seconds", nil])
+    }
 }
 
 private func parseModifiers(_ source: String) -> DeclModifierListSyntax? {

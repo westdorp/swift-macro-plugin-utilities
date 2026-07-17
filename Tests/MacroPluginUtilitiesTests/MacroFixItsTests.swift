@@ -97,6 +97,55 @@ struct MacroFixItsTests {
                 """
         )
     }
+
+    @Test("Remove-initializer replaces only the binding and trims horizontal residue")
+    func removeInitializerReplacesBindingAndTrimsResidue() throws {
+        let classDecl = try parseClass("class Target { let value: Int = makeValue()   }")
+        let property = try #require(
+            inlineInitializedStoredProperty(named: "value", in: classDecl)
+        )
+
+        let fixIt = makeRemoveInitializerFixIt(
+            from: property,
+            propertyName: "value",
+            domain: "Tests"
+        )
+        let replacement = try #require(firstReplacement(in: fixIt))
+
+        #expect(fixIt.changes.count == 1)
+        #expect(replacement.oldNode == Syntax(property.binding))
+        #expect(replacement.newNode.as(PatternBindingSyntax.self)?.description == "value: Int")
+        #expect(
+            fixIt.message.fixItID
+                == MessageID(domain: "Tests", id: "Remove 'value' initializer")
+        )
+    }
+
+    @Test("Remove-initializer preserves comments after the initializer")
+    func removeInitializerPreservesTrailingComment() throws {
+        let classDecl = try parseClass(
+            """
+            class Target {
+                let value: Int = makeValue() // keep
+            }
+            """
+        )
+        let property = try #require(
+            inlineInitializedStoredProperty(named: "value", in: classDecl)
+        )
+
+        let fixIt = makeRemoveInitializerFixIt(
+            from: property,
+            propertyName: "value",
+            domain: "Tests"
+        )
+        let replacement = try #require(firstReplacement(in: fixIt))
+
+        #expect(
+            replacement.newNode.as(PatternBindingSyntax.self)?.description
+                == "value: Int // keep"
+        )
+    }
 }
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {

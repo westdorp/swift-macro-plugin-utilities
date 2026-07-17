@@ -1,4 +1,22 @@
 import SwiftSyntax
+import SwiftSyntaxBuilder
+
+/// Generates a `Sendable` extension for an eligible class that lacks visible conformance.
+public func sendableExtensionIfNeeded(
+    for type: some TypeSyntaxProtocol,
+    attachedTo declaration: some DeclGroupSyntax,
+    lexicalContext: [Syntax],
+    when canGenerateMembers: (ClassDeclSyntax) -> Bool
+) throws -> [ExtensionDeclSyntax] {
+    guard let classDeclaration = declaration.as(ClassDeclSyntax.self),
+          canGenerateMembers(classDeclaration),
+          !hasSendableConformance(in: classDeclaration, lexicalContext: lexicalContext)
+    else {
+        return []
+    }
+
+    return [try ExtensionDeclSyntax("extension \(type): Sendable {}")]
+}
 
 /// Returns whether visible syntax gives a declaration group `Sendable` conformance.
 ///

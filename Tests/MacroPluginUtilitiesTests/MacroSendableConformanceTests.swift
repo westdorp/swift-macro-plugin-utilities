@@ -6,6 +6,102 @@ import Testing
 @Suite("Macro Sendable conformance")
 struct MacroSendableConformanceTests {
     @Test(
+        "Sendable generation partitions declaration kind, eligibility, and conformance",
+        arguments: [
+            SendableGenerationCase(
+                source: "struct Target {}",
+                canGenerateMembers: true,
+                expectedExtensions: []
+            ),
+            SendableGenerationCase(
+                source: "class Target {}",
+                canGenerateMembers: false,
+                expectedExtensions: []
+            ),
+            SendableGenerationCase(
+                source: "class Target: Sendable {}",
+                canGenerateMembers: true,
+                expectedExtensions: []
+            ),
+            SendableGenerationCase(
+                source: "class Target {}",
+                canGenerateMembers: true,
+                expectedExtensions: ["extension Target: Sendable {}"]
+            ),
+        ]
+    )
+    func sendableGenerationPartitionsEligibility(
+        testCase: SendableGenerationCase
+    ) throws {
+        let declaration = try #require(parseDeclarationGroup(testCase.source))
+        let type = parseType("Target")
+
+        let extensions = try sendableExtensionIfNeeded(
+            for: type,
+            attachedTo: declaration,
+            lexicalContext: [],
+            when: { _ in testCase.canGenerateMembers }
+        )
+
+        #expect(extensions.map(\.trimmedDescription) == testCase.expectedExtensions)
+    }
+
+    @Test("Sendable generation uses visible sibling extensions")
+    func sendableGenerationUsesVisibleSiblingExtension() throws {
+        let sourceFile = Parser.parse(
+            source: """
+            class Target {}
+            extension Target: Sendable {}
+            """
+        )
+        let target = try #require(
+            sourceFile.statements.first?
+                .item.as(DeclSyntax.self)?
+                .as(ClassDeclSyntax.self)
+        )
+
+        let extensions = try sendableExtensionIfNeeded(
+            for: parseType("Target"),
+            attachedTo: target,
+            lexicalContext: [],
+            when: { _ in true }
+        )
+
+        #expect(extensions.isEmpty)
+    }
+
+    @Test("Sendable generation preserves detached lexical qualification")
+    func sendableGenerationPreservesDetachedLexicalQualification() throws {
+        let sourceFile = Parser.parse(
+            source: """
+            enum Namespace {
+                class Target {}
+            }
+            extension Namespace.Target: Sendable {}
+            """
+        )
+        let namespace = try #require(
+            sourceFile.statements.first?
+                .item.as(DeclSyntax.self)?
+                .as(EnumDeclSyntax.self)
+        )
+        let target = try #require(
+            namespace.memberBlock.members.first?
+                .decl.as(ClassDeclSyntax.self)?
+                .detached
+        )
+
+        let extensions = try sendableExtensionIfNeeded(
+            for: parseType("Namespace.Target"),
+            attachedTo: target,
+            lexicalContext: [Syntax(namespace)],
+            when: { _ in true }
+        )
+
+        #expect(extensions.isEmpty)
+    }
+
+    @Test(
         "Direct inheritance works for every declaration group",
         arguments: [
             "class Target: Sendable {}",
@@ -351,11 +447,22 @@ struct MacroSendableConformanceTests {
     }
 }
 
+struct SendableGenerationCase: Sendable {
+    let source: String
+    let canGenerateMembers: Bool
+    let expectedExtensions: [String]
+}
+
 private func parseDeclarationGroup(_ source: String) -> (any DeclGroupSyntax)? {
     Parser.parse(source: source)
         .statements.first?
         .item.as(DeclSyntax.self)?
         .asProtocol(DeclGroupSyntax.self)
+}
+
+private func parseType(_ source: String) -> TypeSyntax {
+    var parser = Parser(source)
+    return TypeSyntax.parse(from: &parser)
 }
 
 private func sendableConformanceForKnownGroup(
