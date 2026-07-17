@@ -1,17 +1,22 @@
 import SwiftSyntax
 
 public func hasSendableConformance(
-    in classDecl: ClassDeclSyntax,
+    in declaration: some DeclGroupSyntax,
     lexicalContext: [Syntax] = []
 ) -> Bool {
-    if inheritedTypesContainSendable(classDecl.inheritanceClause?.inheritedTypes) {
+    if inheritedTypesContainSendable(declaration.inheritanceClause?.inheritedTypes) {
         return true
     }
 
-    let declaredTypeNameComponents = declaredTypeNameComponents(for: classDecl)
+    guard let declaredTypeNameComponents = declaredTypeNameComponents(
+        for: declaration,
+        lexicalContext: lexicalContext
+    ) else {
+        return false
+    }
 
-    if let sourceFile = sourceFile(containing: Syntax(classDecl)),
-       syntaxContainsSendableExtension(
+    if let sourceFile = sourceFile(containing: Syntax(declaration)),
+       declarationContainerContainsSendableExtension(
            in: Syntax(sourceFile),
            expectedTypeNameComponents: declaredTypeNameComponents
        )
@@ -20,7 +25,7 @@ public func hasSendableConformance(
     }
 
     return lexicalContext.contains { contextNode in
-        syntaxContainsSendableExtension(
+        declarationContainerContainsSendableExtension(
             in: rootSyntax(containing: contextNode),
             expectedTypeNameComponents: declaredTypeNameComponents
         )
@@ -74,11 +79,39 @@ private func typeReferencesSendable(_ type: TypeSyntax) -> Bool {
         || normalized.hasSuffix(".Sendable")
 }
 
-private func syntaxContainsSendableExtension(
+private func declarationContainerContainsSendableExtension(
     in syntax: Syntax,
     expectedTypeNameComponents: [String]
 ) -> Bool {
-    if let extensionDecl = syntax.as(ExtensionDeclSyntax.self),
+    if let sourceFile = syntax.as(SourceFileSyntax.self) {
+        return sourceFile.statements.contains { item in
+            guard let declaration = item.item.as(DeclSyntax.self) else {
+                return false
+            }
+            return declarationContainsSendableExtension(
+                declaration,
+                expectedTypeNameComponents: expectedTypeNameComponents
+            )
+        }
+    }
+
+    guard let declarationGroup = syntax.asProtocol(DeclGroupSyntax.self) else {
+        return false
+    }
+
+    return declarationGroup.memberBlock.members.contains { member in
+        declarationContainsSendableExtension(
+            member.decl,
+            expectedTypeNameComponents: expectedTypeNameComponents
+        )
+    }
+}
+
+private func declarationContainsSendableExtension(
+    _ declaration: DeclSyntax,
+    expectedTypeNameComponents: [String]
+) -> Bool {
+    if let extensionDecl = declaration.as(ExtensionDeclSyntax.self),
        let extendedTypeComponents = typeNameComponents(for: extensionDecl.extendedType),
        extendedTypeComponents == expectedTypeNameComponents,
        inheritedTypesContainSendable(extensionDecl.inheritanceClause?.inheritedTypes)
@@ -86,9 +119,13 @@ private func syntaxContainsSendableExtension(
         return true
     }
 
-    return syntax.children(viewMode: .sourceAccurate).contains { child in
-        syntaxContainsSendableExtension(
-            in: child,
+    guard let declarationGroup = declaration.asProtocol(DeclGroupSyntax.self) else {
+        return false
+    }
+
+    return declarationGroup.memberBlock.members.contains { member in
+        declarationContainsSendableExtension(
+            member.decl,
             expectedTypeNameComponents: expectedTypeNameComponents
         )
     }
@@ -104,18 +141,76 @@ private func rootSyntax(containing node: Syntax) -> Syntax {
     return current
 }
 
-private func declaredTypeNameComponents(for classDecl: ClassDeclSyntax) -> [String] {
-    var components: [String] = [classDecl.name.text]
-    var current = Syntax(classDecl).parent
+private func declaredTypeNameComponents(
+    for declaration: some DeclGroupSyntax,
+    lexicalContext: [Syntax]
+) -> [String]? {
+    let declarationSyntax = Syntax(declaration)
+
+    if let extensionDecl = declarationSyntax.as(ExtensionDeclSyntax.self) {
+        return typeNameComponents(for: extensionDecl.extendedType)
+    }
+
+    guard let declaredName = nominalTypeName(from: declarationSyntax) else {
+        return nil
+    }
+
+    let enclosingComponents: [String]
+    if let parent = declarationSyntax.parent {
+        guard let attachedComponents = enclosingTypeNameComponents(startingAt: parent) else {
+            return nil
+        }
+        enclosingComponents = attachedComponents
+    } else {
+        guard let lexicalComponents = enclosingTypeNameComponents(
+            in: lexicalContext
+        ) else {
+            return nil
+        }
+        enclosingComponents = lexicalComponents
+    }
+
+    return enclosingComponents + [declaredName]
+}
+
+private func enclosingTypeNameComponents(startingAt syntax: Syntax) -> [String]? {
+    var components: [String] = []
+    var current: Syntax? = syntax
 
     while let node = current {
-        if let name = nominalTypeName(from: node) {
-            components.insert(name, at: 0)
+        guard let nodeComponents = enclosingTypeNameComponents(for: node) else {
+            return nil
         }
+        components.insert(contentsOf: nodeComponents, at: 0)
         current = node.parent
     }
 
     return components
+}
+
+private func enclosingTypeNameComponents(in lexicalContext: [Syntax]) -> [String]? {
+    var components: [String] = []
+
+    for node in lexicalContext {
+        guard let nodeComponents = enclosingTypeNameComponents(for: node) else {
+            return nil
+        }
+        components.insert(contentsOf: nodeComponents, at: 0)
+    }
+
+    return components
+}
+
+private func enclosingTypeNameComponents(for syntax: Syntax) -> [String]? {
+    if let extensionDecl = syntax.as(ExtensionDeclSyntax.self) {
+        return typeNameComponents(for: extensionDecl.extendedType)
+    }
+
+    if let name = nominalTypeName(from: syntax) {
+        return [name]
+    }
+
+    return []
 }
 
 private func nominalTypeName(from syntax: Syntax) -> String? {
@@ -133,6 +228,10 @@ private func nominalTypeName(from syntax: Syntax) -> String? {
 
     if let actorDecl = syntax.as(ActorDeclSyntax.self) {
         return actorDecl.name.text
+    }
+
+    if let protocolDecl = syntax.as(ProtocolDeclSyntax.self) {
+        return protocolDecl.name.text
     }
 
     return nil
