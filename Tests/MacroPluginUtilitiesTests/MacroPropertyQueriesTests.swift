@@ -62,6 +62,46 @@ struct MacroPropertyQueriesTests {
         )
     }
 
+    @Test(
+        "Inline-initialized lookup returns the exact eligible binding",
+        arguments: [
+            ("let value = 1", "value", "value = 1"),
+            ("var other = 0, value: Int = 1", "value", "value: Int = 1"),
+            ("let `repeat` = 1", "`repeat`", "`repeat` = 1"),
+        ]
+    )
+    func inlineInitializedLookupReturnsExactBinding(
+        member: String,
+        name: String,
+        expectedBinding: String
+    ) throws {
+        let classDecl = try parseClass("class Target { \(member) }")
+
+        let property = try #require(
+            inlineInitializedStoredProperty(named: name, in: classDecl)
+        )
+
+        #expect(property.identifier.identifier.text == name)
+        #expect(property.binding.trimmedDescription == expectedBinding)
+    }
+
+    @Test(
+        "Inline-initialized lookup rejects unsupported bindings",
+        arguments: [
+            "let value: Int",
+            "var value: Int { 1 }",
+            "static let value = 1",
+            "class var value: Int { 1 }",
+            "let (value, other) = (1, 2)",
+            "let other = 1",
+        ]
+    )
+    func inlineInitializedLookupRejectsUnsupportedBindings(member: String) throws {
+        let classDecl = try parseClass("class Target { \(member) }")
+
+        #expect(inlineInitializedStoredProperty(named: "value", in: classDecl) == nil)
+    }
+
     @Test("Unsupported storage returns unmanaged names in source order")
     func unsupportedStorageReturnsUnmanagedNamesInSourceOrder() throws {
         let classDecl = try parseClass(

@@ -1,5 +1,20 @@
 import SwiftSyntax
 
+/// The identifier and exact binding for a stored property with an initializer.
+public struct InlineInitializedStoredProperty {
+    /// The binding's identifier pattern.
+    public let identifier: IdentifierPatternSyntax
+
+    /// The binding that owns the initializer.
+    public let binding: PatternBindingSyntax
+
+    /// Creates a projection from one initialized property binding.
+    public init(identifier: IdentifierPatternSyntax, binding: PatternBindingSyntax) {
+        self.identifier = identifier
+        self.binding = binding
+    }
+}
+
 /// Returns whether a class declares a stored instance `let` with the expected name and normalized type.
 public func hasStoredLetProperty(
     named propertyName: String,
@@ -26,6 +41,33 @@ public func hasStoredLetProperty(
             return typeMatches(typeAnnotation.type, expectedTypeName: typeName)
         }
     }
+}
+
+/// Returns the first stored instance-property binding with the expected name and an initializer.
+public func inlineInitializedStoredProperty(
+    named propertyName: String,
+    in classDecl: ClassDeclSyntax
+) -> InlineInitializedStoredProperty? {
+    classDecl.memberBlock.members.lazy.compactMap { member -> InlineInitializedStoredProperty? in
+        guard let variableDecl = member.decl.as(VariableDeclSyntax.self),
+              isInstanceVariable(variableDecl)
+        else {
+            return nil
+        }
+
+        return variableDecl.bindings.lazy.compactMap { binding in
+            guard binding.accessorBlock == nil,
+                  binding.initializer != nil,
+                  let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
+                  identifier.identifier.text == propertyName
+            else {
+                return nil
+            }
+            return InlineInitializedStoredProperty(identifier: identifier, binding: binding)
+        }
+        .first
+    }
+    .first
 }
 
 /// Returns unmanaged, uninitialized stored instance-property names in source order.

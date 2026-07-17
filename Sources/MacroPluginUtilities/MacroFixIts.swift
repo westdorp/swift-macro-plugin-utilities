@@ -49,3 +49,30 @@ public func makeAddMainActorFixIt(for classDecl: ClassDeclSyntax, fixItMessage: 
         ]
     )
 }
+
+/// Creates a one-change fix-it that removes a property's inline initializer.
+public func makeRemoveInitializerFixIt(
+    from property: InlineInitializedStoredProperty,
+    propertyName: String,
+    domain: String
+) -> FixIt {
+    var replacement = property.binding
+    var trailingTriviaPieces = replacement.trailingTrivia.pieces
+    replacement.initializer = nil
+    trimHorizontalWhitespace: while let last = trailingTriviaPieces.last {
+        switch last {
+        case .spaces, .tabs:
+            trailingTriviaPieces.removeLast()
+        default:
+            break trimHorizontalWhitespace
+        }
+    }
+    replacement.trailingTrivia = Trivia(pieces: trailingTriviaPieces)
+
+    return FixIt(
+        message: MacroFixItMessage("Remove '\(propertyName)' initializer", domain: domain),
+        changes: [
+            .replace(oldNode: Syntax(property.binding), newNode: Syntax(replacement))
+        ]
+    )
+}
