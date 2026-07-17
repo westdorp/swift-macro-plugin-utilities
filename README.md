@@ -41,7 +41,10 @@ overloads, or compiler-known type equivalence. Type matching normalizes optional
 spellings, whitespace, single-element parentheses, qualification, and
 existential `any`; opaque `some` remains distinct. `Sendable` extension
 discovery visits source-file and declaration-group declaration lists, not
-function, closure, initializer, accessor, or expression bodies.
+function, closure, initializer, accessor, or expression bodies. Extensions
+inside `#if` blocks are not discovered: the active build configuration is
+unknowable syntactically, so conditionally compiled conformances stay the
+caller's responsibility.
 
 See [MIGRATION.md](MIGRATION.md) for the `0.1.0` signature and behavior changes.
 

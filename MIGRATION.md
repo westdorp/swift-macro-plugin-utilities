@@ -70,6 +70,10 @@ generic function.
 - `hasSendableConformance` reconstructs detached declaration qualification from
   lexical context, compares complete qualified components, and ignores extension
   declarations hidden in executable bodies.
+- `hasSendableConformance` no longer discovers extensions inside `#if` blocks
+  (the frozen implementation's unrestricted traversal did). The active build
+  configuration is unknowable syntactically; conditionally compiled
+  conformances remain the caller's responsibility.
 - Type normalization deliberately removes existential `any` while preserving
   opaque `some`; this behavior is unchanged and is now documented.
 - No public symbol is removed or renamed.
