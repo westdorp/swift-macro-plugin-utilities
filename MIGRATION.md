@@ -1,3 +1,63 @@
+# Migrating to 0.2.0
+
+## `0.1.0` adopters
+
+### Use structured diagnostics
+
+`MacroDiagnosticMessage` no longer accepts arbitrary message text.
+
+Before:
+
+```swift
+MacroDiagnosticMessage(
+    MacroDiagnosticText.compose(what: what, why: why, how: how),
+    domain: domain,
+    id: id
+)
+```
+
+After:
+
+```swift
+MacroDiagnosticMessage(
+    domain: domain,
+    id: id,
+    what: what,
+    why: why,
+    how: how,
+    severity: .error
+)
+```
+
+For error emission, prefer the context convenience:
+
+```swift
+context.diagnose(
+    node,
+    domain: domain,
+    id: id,
+    what: what,
+    why: why,
+    how: how,
+    fixIts: fixIts
+)
+```
+
+Rewrite arbitrary raw messages into meaningful WHAT, WHY, and HOW fragments.
+Warning and note callers use the structured initializer because the convenience
+deliberately emits errors.
+
+### Supply visible diagnostic fragments
+
+Empty and whitespace-only fragments formerly rendered blank content such as
+`WHAT:  WHY: reason HOW: `. They now render a label-specific
+`[diagnostic authoring defect — empty … fragment]` sentinel. Supply nonempty
+fragments and update exact diagnostic snapshots; the sentinel is fallback
+visibility, not an endorsed authoring path.
+
+All other `0.1.0` APIs remain source-compatible; the remaining `0.2.0`
+utilities are additive.
+
 # Migrating to 0.1.0
 
 `0.1.0` establishes `swift-macro-plugin-utilities` as the canonical package

@@ -6,15 +6,19 @@ framework, semantic type checker, or runtime library.
 
 ## Diagnostic contract
 
-Macro diagnostics should say what is wrong, why it matters, and how to fix it.
-`MacroDiagnosticText.compose` makes that contract explicit and normalizes
-whitespace without interpreting diagnostic content:
+Macro diagnostics must say what is wrong, why it matters, and how to fix it.
+`MacroDiagnosticMessage` accepts those fragments directly, preserves a stable
+caller-defined identity and severity, and normalizes whitespace without
+interpreting diagnostic content:
 
 ```swift
-let message = MacroDiagnosticText.compose(
+let message = MacroDiagnosticMessage(
+    domain: "ExampleMacro",
+    id: "missing-state",
     what: "State enum is missing.",
     why: "The macro needs a finite state domain.",
-    how: "Add a nested State enum."
+    how: "Add a nested State enum.",
+    severity: .warning
 )
 ```
 
@@ -24,7 +28,11 @@ The result is:
 WHAT: State enum is missing. WHY: The macro needs a finite state domain. HOW: Add a nested State enum.
 ```
 
-Every label is emitted even when a fragment is empty.
+For error diagnostics, `MacroExpansionContext.diagnose` offers the same
+structured contract with either a string ID or a consumer-owned
+`RawRepresentable<String>` ID. Empty fragments render a label-specific
+`[diagnostic authoring defect — empty … fragment]` sentinel so malformed
+diagnostics remain visible without terminating the compiler plugin.
 
 ## Scope and limits
 
@@ -46,7 +54,8 @@ inside `#if` blocks are not discovered: the active build configuration is
 unknowable syntactically, so conditionally compiled conformances stay the
 caller's responsibility.
 
-See [MIGRATION.md](MIGRATION.md) for the `0.1.0` signature and behavior changes.
+See [MIGRATION.md](MIGRATION.md) for version-specific signature and behavior
+changes.
 
 ## Development
 
