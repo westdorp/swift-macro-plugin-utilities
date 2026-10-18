@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fail when a non-test target reaches a package outside swiftlang, apple, and westdorp.
 
-A consumer of any product here resolves every package that a non-test target
-of this package uses, and everything those packages bring; SwiftPM prunes
-only test-target dependencies (SE-0226). A third-party package there can
-conflict with the consumer's own pins, so only test targets may use one.
+This is policy, stricter than what SwiftPM resolves for any one product: every
+non-test target counts, because a target can join a product at any time, so the
+check stays a property of the package rather than of one product. Test targets
+are exempt; SwiftPM never resolves a dependency's test-only packages (SE-0226).
 
 The targets come from `swift package dump-package`; the packages each
 dependency brings come from the resolved tree of `swift package
@@ -104,7 +104,7 @@ def main():
         print(f"ERROR: target {target} reaches {url}, outside {', '.join(sorted(ALLOWED_OWNERS))}.", file=sys.stderr)
     if found:
         print(
-            "Consumers resolve every package a non-test target reaches; move the dependency to a test target or drop it.",
+            "Only test targets may use a package outside these owners; move the dependency to a test target or drop it.",
             file=sys.stderr,
         )
         return 1

@@ -67,11 +67,14 @@ class DependencyOwnerTests(unittest.TestCase):
         graph = manifest(("Library", "regular", [product("Wrapper", "wrapper")]))
         self.assertIn(("Library", "https://github.com/pointfreeco/swift-case-paths"), gate.violations(graph, tree(wrapper)))
 
-    def test_executables_plugins_and_conditional_dependencies_count(self):
-        graph = manifest(
-            ("Tool", "executable", [product("CasePaths", "swift-case-paths", {"platformNames": ["macos"]})]),
-            ("Lint", "plugin", [{"target": ["Tool", None]}]),
-        )
+    def test_every_non_test_target_kind_counts(self):
+        for kind in ("regular", "executable", "macro", "plugin"):
+            with self.subTest(kind=kind):
+                graph = manifest(("Target", kind, [product("CasePaths", "swift-case-paths")]))
+                self.assertIn(("Target", "https://github.com/pointfreeco/swift-case-paths"), gate.violations(graph, tree(CASE_PATHS)))
+
+    def test_conditional_dependencies_count(self):
+        graph = manifest(("Tool", "executable", [product("CasePaths", "swift-case-paths", {"platformNames": ["macos"]})]))
         self.assertIn(("Tool", "https://github.com/pointfreeco/swift-case-paths"), gate.violations(graph, tree(CASE_PATHS)))
 
     def test_a_third_party_build_plugin_fails_and_a_local_one_passes(self):

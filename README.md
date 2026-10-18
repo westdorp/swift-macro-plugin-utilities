@@ -80,10 +80,10 @@ make test
 ```
 
 The gate includes `make test-dependency-owners`, which fails when a non-test
-target reaches a package outside `swiftlang`, `apple`, and `westdorp`.
-Consumers resolve every such package, so a third-party one could conflict with
-their own pins; test-only packages are exempt because SwiftPM never resolves
-them for a consumer.
+target reaches a package outside `swiftlang`, `apple`, and `westdorp`. Every
+non-test target counts, by policy, because a target can join a product at any
+time; test-only packages are exempt because SwiftPM never resolves them for a
+consumer.
 
 Build with complete strict-concurrency checking using:
 
@@ -111,3 +111,8 @@ extraction origin; development continues here.
 Patch releases preserve source compatibility within each minor line. Before
 `1.0`, a new minor release may include breaking API changes and will provide
 migration notes.
+
+Every westdorp package that uses these utilities requires them with
+`.upToNextMinor(from:)` on the same minor, so they always admit the same
+release and cannot conflict with each other. A new minor release moves all of
+them together. At `1.0` they move to `from:`.
