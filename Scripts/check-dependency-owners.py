@@ -55,6 +55,11 @@ def used_packages(manifest):
                     f"{target['name']} depends on {dependency['byName'][0]} by name, so its package is unknown; "
                     "spell it .product(name:package:)"
                 )
+        # A build-tool plugin from another package is a dependency too; `None` names a local one.
+        for usage in target.get("pluginUsages") or []:
+            _, package = usage["plugin"]
+            if package is not None:
+                used.setdefault(package.lower(), set()).add(target["name"])
     return used
 
 

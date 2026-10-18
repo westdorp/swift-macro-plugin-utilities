@@ -25,8 +25,13 @@ CASE_PATHS = package("swift-case-paths", "https://github.com/pointfreeco/swift-c
 MACRO_TESTING = package("swift-macro-testing", "https://github.com/pointfreeco/swift-macro-testing")
 
 
-def manifest(*targets):
-    return {"targets": [{"name": name, "type": kind, "dependencies": dependencies} for name, kind, dependencies in targets]}
+def manifest(*targets, plugins=None):
+    return {
+        "targets": [
+            {"name": name, "type": kind, "dependencies": dependencies, "pluginUsages": (plugins or {}).get(name)}
+            for name, kind, dependencies in targets
+        ]
+    }
 
 
 def product(name, package_name, condition=None):
@@ -66,6 +71,15 @@ class DependencyOwnerTests(unittest.TestCase):
             ("Lint", "plugin", [{"target": ["Tool", None]}]),
         )
         self.assertIn(("Tool", "https://github.com/pointfreeco/swift-case-paths"), gate.violations(graph, tree(CASE_PATHS)))
+
+    def test_a_third_party_build_plugin_fails_and_a_local_one_passes(self):
+        lint = package("swiftlint", "https://github.com/realm/SwiftLint")
+        graph = manifest(
+            ("Library", "regular", []),
+            ("Local", "plugin", []),
+            plugins={"Library": [{"plugin": ["SwiftLintBuildToolPlugin", "SwiftLint"]}, {"plugin": ["Local", None]}]},
+        )
+        self.assertEqual(gate.violations(graph, tree(lint)), [("Library", "https://github.com/realm/SwiftLint")])
 
     def test_test_targets_are_exempt(self):
         graph = manifest(
