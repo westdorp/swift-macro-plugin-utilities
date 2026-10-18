@@ -80,10 +80,9 @@ make test
 ```
 
 The gate includes `make test-dependency-owners`, which fails when a non-test
-target reaches a package outside `swiftlang`, `apple`, and `westdorp`. Every
-non-test target counts, by policy, because a target can join a product at any
-time; test-only packages are exempt because SwiftPM never resolves them for a
-consumer.
+target reaches a package outside `swiftlang`, `apple`, and `westdorp`;
+test-only packages are exempt. The docstring of
+`Scripts/check-dependency-owners.py` explains why.
 
 Build with complete strict-concurrency checking using:
 

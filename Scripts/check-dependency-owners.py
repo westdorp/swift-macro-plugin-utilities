@@ -22,7 +22,7 @@ ALLOWED_OWNERS = frozenset({"swiftlang", "apple", "westdorp"})
 
 
 class GateError(Exception):
-    """A dependency the check cannot attribute to a package in the resolved tree."""
+    """The check cannot read the package or attribute a dependency to a package in the resolved tree."""
 
 
 def owner(url):
