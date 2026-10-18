@@ -52,6 +52,8 @@ The package provides:
 - structured diagnostics: `MacroDiagnosticMessage`, `MacroFixItMessage`,
   `MacroDiagnosticText.compose`, and both `MacroExpansionContext.diagnose`
   overloads;
+- source locations: `sourceLocationDirective`, a `#sourceLocation` directive
+  that reports errors in generated code on the user's declaration;
 - attached-class validation: `MacroAttachedClassRequirements` and its
   `DiagnosticIDs`, `MacroAttachedClassRequirement`, and
   `MacroAttachedClassValidator`.
