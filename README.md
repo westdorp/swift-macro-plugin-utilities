@@ -79,6 +79,12 @@ Run the complete package gate with:
 make test
 ```
 
+The gate includes `make test-dependency-owners`, which fails when a library
+product reaches a package outside `swiftlang`, `apple`, and `westdorp`.
+Consumers resolve every such package, so a third-party one could conflict with
+their own pins; test-only packages are exempt because SwiftPM never resolves
+them for a consumer.
+
 Build with complete strict-concurrency checking using:
 
 ```sh
