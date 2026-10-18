@@ -79,6 +79,11 @@ Run the complete package gate with:
 make test
 ```
 
+The gate includes `make test-dependency-owners`, which fails when a non-test
+target reaches a package outside `swiftlang`, `apple`, and `westdorp`;
+test-only packages are exempt. The docstring of
+`Scripts/check-dependency-owners.py` explains why.
+
 Build with complete strict-concurrency checking using:
 
 ```sh
@@ -105,3 +110,8 @@ extraction origin; development continues here.
 Patch releases preserve source compatibility within each minor line. Before
 `1.0`, a new minor release may include breaking API changes and will provide
 migration notes.
+
+Policy for westdorp packages that use these utilities: require them with
+`.upToNextMinor(from:)` on the same minor, so they admit the same release and
+cannot conflict with each other, and move them together on each new minor. At
+`1.0` they move to `from:`.
