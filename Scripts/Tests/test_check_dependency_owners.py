@@ -26,12 +26,14 @@ MACRO_TESTING = package("swift-macro-testing", "https://github.com/pointfreeco/s
 
 
 def manifest(*targets, plugins=None):
-    return {
-        "targets": [
-            {"name": name, "type": kind, "dependencies": dependencies, "pluginUsages": (plugins or {}).get(name)}
-            for name, kind, dependencies in targets
-        ]
-    }
+    """dump-package's shape: a target that uses no plugin has no `pluginUsages` key."""
+    result = []
+    for name, kind, dependencies in targets:
+        target = {"name": name, "type": kind, "dependencies": dependencies}
+        if plugins and name in plugins:
+            target["pluginUsages"] = plugins[name]
+        result.append(target)
+    return {"targets": result}
 
 
 def product(name, package_name, condition=None):
