@@ -112,7 +112,7 @@ Patch releases preserve source compatibility within each minor line. Before
 `1.0`, a new minor release may include breaking API changes and will provide
 migration notes.
 
-Every westdorp package that uses these utilities requires them with
-`.upToNextMinor(from:)` on the same minor, so they always admit the same
-release and cannot conflict with each other. A new minor release moves all of
-them together. At `1.0` they move to `from:`.
+Policy for westdorp packages that use these utilities: require them with
+`.upToNextMinor(from:)` on the same minor, so they admit the same release and
+cannot conflict with each other, and move them together on each new minor. At
+`1.0` they move to `from:`.
