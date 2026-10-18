@@ -28,6 +28,33 @@ struct MacroSourceLocationTests {
         )
     }
 
+    @Test("A node spanning lines is attributed to the line it starts on")
+    func multilineNodeStartsTheRange() throws {
+        let (declaration, context) = try located("struct First {}\n\n// Note\nstruct Second {\n    var value = 1\n}")
+
+        #expect(
+            sourceLocationDirective(at: declaration, in: context)
+                == #"#sourceLocation(file: "/Users/test/Sources/Model.swift", line: 4)"#
+        )
+    }
+
+    @Test("An offset below the first line has no directive")
+    func offsetBelowFirstLineHasNoDirective() throws {
+        let (declaration, context) = try located("struct Only {}")
+
+        #expect(sourceLocationDirective(at: declaration, lineOffset: -1, in: context) == nil)
+    }
+
+    @Test("A path a plain string literal can't carry has no directive", arguments: [
+        #"/Users/test/Sources/Quote"d.swift"#,
+        #"C:\Users\test\Model.swift"#,
+    ])
+    func unrepresentablePathHasNoDirective(path: String) throws {
+        let (declaration, context) = try located("struct Only {}", filePath: path)
+
+        #expect(sourceLocationDirective(at: declaration, in: context) == nil)
+    }
+
     @Test("A node outside the context's source files has no directive")
     func unknownNodeHasNoDirective() throws {
         let (_, context) = try located("struct First {}\nstruct Second {}")
@@ -37,11 +64,14 @@ struct MacroSourceLocationTests {
     }
 
     /// The last declaration of `source`, and a context that knows the file at `filePath`.
-    private func located(_ source: String) throws -> (DeclSyntax, BasicMacroExpansionContext) {
+    private func located(
+        _ source: String,
+        filePath: String = Self.filePath
+    ) throws -> (DeclSyntax, BasicMacroExpansionContext) {
         let file = Parser.parse(source: source)
         let declaration = try #require(file.statements.last?.item.as(DeclSyntax.self))
         let context = BasicMacroExpansionContext(
-            sourceFiles: [file: .init(moduleName: "Tests", fullFilePath: Self.filePath)]
+            sourceFiles: [file: .init(moduleName: "Tests", fullFilePath: filePath)]
         )
         return (declaration, context)
     }

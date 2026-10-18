@@ -1,11 +1,15 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// A `#sourceLocation` directive that attributes the lines after it to `node`'s line in the
-/// user's file, so a type error in generated code is reported on the user's declaration; `nil`
-/// when the context cannot locate `node`.
+/// A `#sourceLocation` directive that attributes the lines after it to the line where `node`
+/// starts, after its leading trivia, in the user's file, so a type error in generated code is
+/// reported on the user's declaration.
 ///
 /// Close the covered lines with `#sourceLocation()`.
+///
+/// Returns `nil` when no directive can name that place: the context can't locate `node`, the
+/// file path holds a quote or backslash (a `#sourceLocation` file must be a plain string
+/// literal, and an escaped one names a different file), or `lineOffset` moves the line below 1.
 ///
 /// - Parameter lineOffset: Added to the node's line, for an expansion that puts lines between
 ///   the directive and the code it covers.
@@ -15,9 +19,12 @@ public func sourceLocationDirective(
     in context: some MacroExpansionContext
 ) -> String? {
     guard let location = context.location(of: node, at: .afterLeadingTrivia, filePathMode: .filePath),
-          let line = location.line.as(IntegerLiteralExprSyntax.self)?.representedLiteralValue
+          let line = location.line.as(IntegerLiteralExprSyntax.self)?.representedLiteralValue,
+          let file = location.file.as(StringLiteralExprSyntax.self),
+          file.openingPounds == nil,
+          line + lineOffset >= 1
     else {
         return nil
     }
-    return "#sourceLocation(file: \(location.file.trimmedDescription), line: \(line + lineOffset))"
+    return "#sourceLocation(file: \(file.trimmedDescription), line: \(line + lineOffset))"
 }
