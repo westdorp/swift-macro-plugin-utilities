@@ -45,9 +45,11 @@ struct MacroSourceLocationTests {
         #expect(sourceLocationDirective(at: declaration, lineOffset: -1, in: context) == nil)
     }
 
-    @Test("A path a plain string literal can't carry has no directive", arguments: [
+    @Test("A path a string literal must escape has no directive", arguments: [
         #"/Users/test/Sources/Quote"d.swift"#,
         #"C:\Users\test\Model.swift"#,
+        "/Users/test/Sources/Tab\tModel.swift",
+        "/Users/test/Sources/Line\u{2028}Model.swift",
     ])
     func unrepresentablePathHasNoDirective(path: String) throws {
         let (declaration, context) = try located("struct Only {}", filePath: path)

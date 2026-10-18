@@ -8,8 +8,9 @@ import SwiftSyntaxMacros
 /// Close the covered lines with `#sourceLocation()`.
 ///
 /// Returns `nil` when no directive can name that place: the context can't locate `node`, the
-/// file path holds a quote or backslash (a `#sourceLocation` file must be a plain string
-/// literal, and an escaped one names a different file), or `lineOffset` moves the line below 1.
+/// file path holds a character a string literal must escape (a quote, backslash, tab, newline
+/// or other control character; `#sourceLocation` reads its file literally, so an escaped path
+/// names a different file), or `lineOffset` moves the line below 1.
 ///
 /// - Parameter lineOffset: Added to the node's line, for an expansion that puts lines between
 ///   the directive and the code it covers.
@@ -21,7 +22,8 @@ public func sourceLocationDirective(
     guard let location = context.location(of: node, at: .afterLeadingTrivia, filePathMode: .filePath),
           let line = location.line.as(IntegerLiteralExprSyntax.self)?.representedLiteralValue,
           let file = location.file.as(StringLiteralExprSyntax.self),
-          file.openingPounds == nil,
+          let path = file.representedLiteralValue,
+          file.trimmedDescription == "\"\(path)\"",
           line + lineOffset >= 1
     else {
         return nil
