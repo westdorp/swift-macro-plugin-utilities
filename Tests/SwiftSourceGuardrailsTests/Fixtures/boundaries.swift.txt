@@ -1,0 +1,11 @@
+let longer = Task.sleeper
+let prefixed = OtherTask.sleep
+let unicode = Task.sleepé
+let unrelated = 10 / 2
+Task /* member */ .
+sleep()
+`Task`.`sleep`()
+ContinuousClock()
+ContinuousClock(value)
+Task; .sleep
+let separated = (Task, "ignored", sleep)

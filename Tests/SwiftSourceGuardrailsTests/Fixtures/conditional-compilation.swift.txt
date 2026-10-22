@@ -1,0 +1,29 @@
+Task
+#if A
+.sleep()
+#endif
+Task
+#if A
+#elseif B
+.sleep()
+#else
+.yield()
+#endif
+
+Task
+#if A
+#else
+.sleep()
+#endif
+
+Task
+#if A
+#endif
+.sleep()
+#if A
+Task.sleep()
+#elseif B
+Task.sleep()
+#else
+Task.sleep()
+#endif

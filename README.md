@@ -4,6 +4,12 @@
 deterministic fix-its for Swift macro-plugin implementations. It is not a macro
 framework, semantic type checker, or runtime library.
 
+The package also ships [`swift-source-guardrails`](Documentation/SourceGuardrails.md),
+a SwiftParser-based executable for repository-owned token bans and counted
+allowlists. It emits JSON plus human diagnostics and leaves library APIs unchanged.
+Swift Package Manager resolves the executable's `swift-argument-parser`
+dependency even for consumers that use only the `MacroPluginUtilities` library.
+
 ## Diagnostic contract
 
 Macro diagnostics must say what is wrong, why it matters, and how to fix it.
@@ -92,8 +98,9 @@ make build
 
 ## Platform floor
 
-The manifest declares macOS 10.15, matching SwiftSyntax 602's dependency
-floor. This is a compiler-host build constraint: macro plugins do not execute
+The package requires macOS 13 or later on the compiler host, matching its
+macOS 13-or-later consumers and supporting throwing output writes in
+`swift-source-guardrails`. Macro plugins do not execute
 in downstream app processes, and the declaration does not set an app deployment
 target. The package gate verifies this host configuration on macOS 26.
 
