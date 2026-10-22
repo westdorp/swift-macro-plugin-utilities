@@ -45,7 +45,7 @@ struct GuardrailCommandTests {
         #expect(report.humanSummary.contains("passed"))
     }
 
-    @Test(arguments: ["missing-config", "bad-config", "missing-root", "file-root", "missing-scope", "empty-scope", "non-swift-scope", "invalid-utf8", "malformed-swift"])
+    @Test(arguments: ["missing-config", "bad-config", "missing-root", "file-root", "missing-scope", "missing-scope-ancestor", "empty-scope", "non-swift-scope", "invalid-utf8", "malformed-swift"])
     func inputFailuresAreJSONReports(scenario: String) throws {
         let fixture = try CommandFixture()
         defer { fixture.remove() }
@@ -53,13 +53,22 @@ struct GuardrailCommandTests {
         try fixture.write("Tests/File.swift", "let value = 2")
         var config = fixture.config
         var root = fixture.root
+        var expectedError: String?
         switch scenario {
-        case "missing-config": config = fixture.root.appendingPathComponent("absent.json")
+        case "missing-config":
+            config = fixture.root.appendingPathComponent("absent.json")
+            expectedError = "missing config \(config.path)"
         case "bad-config": try fixture.write("guardrails.json", "{}")
-        case "missing-root": root = fixture.root.appendingPathComponent("absent")
+        case "missing-root":
+            root = fixture.root.appendingPathComponent("absent")
+            expectedError = "missing root \(root.path)"
         case "file-root": root = fixture.config
         case "missing-scope":
-            try fixture.write("guardrails.json", SourceGuardrailsTests.config.replacingOccurrences(of: "\"Sources\"", with: "\"Missing\""))
+            try fixture.write("guardrails.json", SourceGuardrailsTests.config.replacingOccurrences(of: "\"Sources\"", with: "\"Sources/Foo\""))
+            expectedError = "missing scope Sources/Foo"
+        case "missing-scope-ancestor":
+            try fixture.write("guardrails.json", SourceGuardrailsTests.config.replacingOccurrences(of: "\"Sources\"", with: "\"Missing/Foo\""))
+            expectedError = "missing scope Missing/Foo"
         case "empty-scope":
             try FileManager.default.createDirectory(at: fixture.root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
             try fixture.write("guardrails.json", SourceGuardrailsTests.config.replacingOccurrences(of: "\"Sources\"", with: "\"Empty\""))
@@ -73,9 +82,22 @@ struct GuardrailCommandTests {
         let report = GuardrailCommand.scan(config: config, root: root)
         #expect(report.exitCode == 2)
         #expect(report.errors.isEmpty == false)
+        if let expectedError { #expect(report.errors == [expectedError]) }
+        #expect(report.errors.joined().contains("NSCocoaErrorDomain") == false)
         #expect(report.violations.isEmpty)
         #expect(report.humanSummary.contains("failed"))
         #expect(throws: Never.self) { try JSONEncoder().encode(report) }
+    }
+
+    @Test func unreadableConfigNamesItsPath() throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        let report = GuardrailCommand.scan(config: fixture.config, root: fixture.root, read: { _ in
+            throw CocoaError(.fileReadNoPermission)
+        })
+        #expect(report.exitCode == 2)
+        #expect(report.errors.joined().contains("Cannot read config \(fixture.config.path):"))
+        #expect(report.errors.joined().contains("NSCocoaErrorDomain") == false)
     }
 
     @Test(arguments: ["file", "directory", "scope-ancestor"])
@@ -110,6 +132,7 @@ struct GuardrailCommandTests {
         })
         #expect(report.exitCode == 2)
         #expect(report.errors.joined().contains("File.swift"))
+        #expect(report.errors.joined().contains("NSCocoaErrorDomain") == false)
         #expect(report.violations.isEmpty)
     }
 
@@ -124,6 +147,7 @@ struct GuardrailCommandTests {
         })
         #expect(report.exitCode == 2)
         #expect(report.errors.joined().contains("Sources"))
+        #expect(report.errors.joined().contains("NSCocoaErrorDomain") == false)
     }
 }
 

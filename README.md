@@ -7,6 +7,8 @@ framework, semantic type checker, or runtime library.
 The package also ships [`swift-source-guardrails`](Documentation/SourceGuardrails.md),
 a SwiftParser-based executable for repository-owned token bans and counted
 allowlists. It emits JSON plus human diagnostics and leaves library APIs unchanged.
+Swift Package Manager resolves the executable's `swift-argument-parser`
+dependency even for consumers that use only the `MacroPluginUtilities` library.
 
 ## Diagnostic contract
 
