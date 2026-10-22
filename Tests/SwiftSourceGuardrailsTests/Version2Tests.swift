@@ -3,6 +3,112 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct Version2Tests {
+    @Test(arguments: [
+        (#"{"kind":"call","name":["Task"]}"#, [1, 2, 6]),
+        (#"{"kind":"call","name":["Task","sleep"]}"#, [9]),
+        (#"{"kind":"member","name":["Task","sleep"]}"#, [8, 9, 17]),
+        (#"{"kind":"call","name":["Thread"]}"#, [19]),
+        (#"{"kind":"call","name":["Thread","init"]}"#, [22]),
+        (#"{"kind":"call","name":["sleep"]}"#, [25])
+    ])
+    func genericCallsAndMembers(match: String, lines: [Int]) throws {
+        #expect(try scan(fixture("v2-calls"), match: match).violations.map(\.line) == lines)
+        #expect(try scan("Other.run()", match: match).violations.isEmpty)
+    }
+
+    @Test(arguments: ["struct", "class", "actor", "enum", "extension"])
+    func lexicalTypeContextIncludesClosuresAndNestedTypes(kind: String) throws {
+        let source = """
+        \(kind) Adapter {
+            func run() {
+                pause()
+                let nested = { pause() }
+                struct Inner { func run() { pause() } }
+            }
+        }
+        struct Other { func run() { pause() } }
+        pause()
+        """
+        let match = #"{"kind":"call","name":["pause"]}"#
+        let inside = #","context":{"relation":"inside","kind":"type","name":"Adapter"}"#
+        let outside = #","context":{"relation":"outside","kind":"type","name":"Adapter"}"#
+        #expect(try scan(source, match: match, fields: inside).violations.map(\.line) == [3, 4, 5])
+        #expect(try scan(source, match: match, fields: outside).violations.map(\.line) == [8, 9])
+    }
+
+    @Test func lexicalFunctionContextIsExhaustiveAndAppliesToTokenRules() throws {
+        let source = """
+        func `adapter`() {
+            pause()
+            func nested() { pause() }
+        }
+        func other() { pause() }
+        """
+        let match = #"{"kind":"tokens","tokens":["pause","(",")"]}"#
+        let inside = #","context":{"relation":"inside","kind":"function","name":"adapter"}"#
+        let outside = #","context":{"relation":"outside","kind":"function","name":"adapter"}"#
+        #expect(try scan(source, match: match, fields: inside).violations.map(\.line) == [2, 3])
+        #expect(try scan(source, match: match, fields: outside).violations.map(\.line) == [5])
+        #expect(try scan("pause()", match: match, fields: inside).violations.isEmpty)
+        #expect(try scan("pause()", match: match, fields: outside).violations.count == 1)
+    }
+
+    @Test func extensionsUseTheFinalTypeComponent() throws {
+        let source = "extension Outer.Adapter<Int> { func run() { pause() } }"
+        let match = #"{"kind":"call","name":["pause"]}"#
+        let fields = #","context":{"relation":"inside","kind":"type","name":"Adapter"}"#
+        #expect(try scan(source, match: match, fields: fields).violations.count == 1)
+    }
+
+    @Test(arguments: ["1", "0x10", "0b10", "0o10", "1_000"])
+    func positiveNamedIntegerLiteralsPass(value: String) throws {
+        let source = """
+        schedule<Result<Int, Error>>(
+            work: { consume([1, 2]) },
+            minutes: \(value)
+        )
+        """
+        let match = #"{"kind":"argument","call":["schedule"],"label":"minutes","validation":"positiveIntegerLiteral"}"#
+        #expect(try scan(source, match: match).exitCode == 0)
+    }
+
+    @Test(arguments: ["0", "-1", "+1", "1.5", "(1)", "1 + 2", "value", "999999999999999999999999999999"])
+    func invalidNamedIntegerValuesFail(value: String) throws {
+        let match = #"{"kind":"argument","call":["schedule"],"label":"minutes","validation":"positiveIntegerLiteral"}"#
+        #expect(try scan("schedule(minutes: \(value))", match: match).violations.count == 1)
+    }
+
+    @Test func missingAndRepeatedArgumentsFailOncePerCall() throws {
+        let match = #"{"kind":"argument","call":["schedule"],"label":"minutes","validation":"positiveIntegerLiteral"}"#
+        let source = "schedule()\nschedule(minutes: 1, minutes: 2)\nother(minutes: 0)"
+        #expect(try scan(source, match: match).violations.map(\.line) == [1, 2])
+    }
+
+    @Test(arguments: [("\"reason\"", true), ("#\"reason\"#", true), ("\" \"", false), ("\"\"", false), ("\"\\(value)\"", false), ("reason", false)])
+    func namedReasonRequiresNonblankLiteral(value: String, passes: Bool) throws {
+        let match = #"{"kind":"argument","call":["unsafeOperation"],"label":"reason","validation":"nonemptyStringLiteral"}"#
+        #expect(try scan("unsafeOperation(reason: \(value))", match: match).violations.isEmpty == passes)
+    }
+
+    @Test(arguments: [
+        #"{"kind":"call","name":[]}"#,
+        #"{"kind":"call","name":["Task.pause"]}"#,
+        #"{"kind":"call","name":["Task"],"tokens":["Task"]}"#,
+        #"{"kind":"member","name":["*"]}"#,
+        #"{"kind":"argument","call":["schedule"],"label":"minutes","validation":"regex"}"#,
+        #"{"kind":"argument","call":["schedule"],"label":"","validation":"positiveIntegerLiteral"}"#
+    ])
+    func malformedCallMatchersAreRejected(match: String) {
+        #expect(throws: GuardrailInputError.self) { try configuration(match: match) }
+    }
+
+    @Test(arguments: [#"null"#, #"{}"#, #"{"relation":"within","kind":"type","name":"Adapter"}"#, #"{"relation":"inside","kind":"closure","name":"Adapter"}"#, #"{"relation":"inside","kind":"type","name":"A.B"}"#, #"{"relation":"inside","kind":"type","name":"Adapter","extra":1}"#])
+    func malformedContextsAreRejected(context: String) {
+        #expect(throws: GuardrailInputError.self) {
+            try configuration(match: #"{"kind":"call","name":["pause"]}"#, fields: #","context":\#(context)"#)
+        }
+    }
+
     @Test(arguments: [("prefix", "check", [1, 3]), ("suffix", "Clock", [4, 5])])
     func identifierTokens(kind: String, text: String, lines: [Int]) throws {
         let source = """

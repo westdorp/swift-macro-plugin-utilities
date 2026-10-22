@@ -1,0 +1,25 @@
+let simple = Task { 1 }
+let generic = Task<
+    Int,
+    Error
+> { 2 }
+let nested = Task<Result<Int, Error>, Never> { .success(3) }
+let other = OtherTask<Int> { 0 }
+let reference = Task<Int, Error>.sleep
+try await Task<
+    Int, Error
+>.sleep(
+    for: .seconds(1)
+)
+try await OtherTask<Int>.sleep()
+let quoted = "try await Task.sleep(for: .seconds(1))"
+// Task<Int, Error>.sleep()
+let borrowed = Task<Int, Error>.sleep(for:)
+try await clock.sleep()
+Thread(
+    block: { let x = [1, 2]; consume(x) }
+)
+Thread.init(
+    block: { consume(1) }
+)
+let implicit: Any = .sleep()

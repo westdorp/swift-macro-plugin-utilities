@@ -107,6 +107,45 @@ To migrate a v1 rule, move its `tokens` array into a `match` object of kind
 Then replace repeated `paths` arrays with a named `scope` where useful.
 The allowlist and output schema do not change.
 
+### Calls, members, contexts and argument values
+
+`{"kind":"call","name":["Task","sleep"]}` matches a
+`FunctionCallExprSyntax` with that spelled callee.
+`{"kind":"member","name":["Task","sleep"]}` also matches member references
+without a call. Generic specializations on any component are ignored:
+`Task<Result<Int, Error>, Never>.sleep(...)` matches both. Balanced generic and
+argument groups, comments, trailing closures and multiline forms are handled by
+SwiftParser. A call to `Task<...> { ... }` has name `["Task"]`;
+`Thread.init(...)` has name `["Thread","init"]`. Names are nonempty component
+arrays, with backticks normalized. They match exactly: `Swift.Task.sleep` needs
+`["Swift","Task","sleep"]`. A single-component name matches a free name or an
+implicit member such as `.sleep()`. These rules do not resolve aliases or types,
+unwrap optional chaining, or search arbitrary expressions for a name.
+
+An occurrence rule may add a sibling `context`:
+
+```json
+"context": {"relation":"outside", "kind":"type", "name":"ClockAdapter"}
+```
+
+`relation` is `inside` or `outside`; `kind` is `type` or `function`. A match is
+inside when its token has an enclosing declaration with that name. Types include
+structs, classes, actors, enums, protocols and extensions; extensions use the
+final type component. Function overloads share a name. Nested types, nested
+functions and closures retain their enclosing context. `outside` is the
+complement, including top-level code. Context names are single Swift names.
+The same filter works with token and identifier rules.
+
+`{"kind":"argument","call":["schedule"],"label":"minutes",`
+`"validation":"positiveIntegerLiteral"}` checks each matching call for exactly
+one argument with that label. Missing, repeated and invalid values report once
+at the call. `positiveIntegerLiteral` requires a positive `IntegerLiteralExprSyntax`
+whose SwiftSyntax `representedLiteralValue` fits `Int`; decimal, binary, octal,
+hexadecimal and separators are supported. Expressions, signed prefixes,
+parentheses, variables, floats, zero and overflow fail. `nonemptyStringLiteral`
+requires a noninterpolated string literal with a nonblank decoded value, suitable
+for a named `reason` argument. Neither validator evaluates expressions.
+
 ## Swift classification and limits
 
 SwiftParser determines code, comments, normal/escaped/raw/multiline strings, and
