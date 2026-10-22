@@ -103,10 +103,9 @@ struct GuardrailConfiguration: Decodable {
             guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw GuardrailInputError("Rule id must be nonblank")
             }
-            let match = try values.decode(RuleMatcher.self, forKey: .match)
             let context = values.contains(.context) ? try values.decode(LexicalContext.self, forKey: .context) : nil
             let condition = values.contains(.when) ? try values.decode(FileCondition.self, forKey: .when) : nil
-            matcher = try match.applying(context: context, condition: condition)
+            matcher = try RuleMatcher(from: values.superDecoder(forKey: .match), context: context, condition: condition)
             switch (values.contains(.paths), values.contains(.scope)) {
             case (true, false):
                 let paths = try values.decode([RelativePath].self, forKey: .paths)

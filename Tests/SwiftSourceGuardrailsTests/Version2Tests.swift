@@ -383,6 +383,141 @@ struct Version2Tests {
         #expect(throws: GuardrailInputError.self) { try GuardrailConfiguration.decode(Data(json.utf8)) }
     }
 
+    @Test(arguments: ["positiveIntegerLiteral", "nonemptyStringLiteral"])
+    func labeledTrailingClosuresParticipateInArgumentValidation(validation: String) throws {
+        let value = validation == "positiveIntegerLiteral" ? "1" : #""reason""#
+        let match = #"{"kind":"argument","call":["schedule"],"label":"minutes","validation":"\#(validation)"}"#
+        let source = """
+        schedule(minutes: \(value)) {} minutes: {}
+        schedule {} minutes: {}
+        schedule(minutes: \(value)) {} other: {}
+        schedule {} other: {}
+        other(minutes: \(value)) {} minutes: {}
+        """
+        #expect(try scan(source, match: match).violations.map(\.line) == [1, 2, 4])
+    }
+
+    @Test(arguments: ["super", "self", "object"])
+    func directlySpelledCalleeComponents(base: String) throws {
+        let source = """
+        \(base).run(minutes: 1)
+        \(base).`run`(minutes: 0)
+        let action = \(base).run
+        other.run(minutes: 0)
+        """
+        let call = #"{"kind":"call","name":["\#(base)","run"]}"#
+        let member = #"{"kind":"member","name":["\#(base)","run"]}"#
+        let argument = #"{"kind":"argument","call":["\#(base)","run"],"label":"minutes","validation":"positiveIntegerLiteral"}"#
+        #expect(try scan(source, match: call).violations.map(\.line) == [1, 2])
+        #expect(try scan(source, match: member).violations.map(\.line) == [1, 2, 3])
+        #expect(try scan(source, match: argument).violations.map(\.line) == [2])
+        #expect(try scan("`run`()\nrunOther()", match: #"{"kind":"call","name":["run"]}"#).violations.map(\.line) == [1])
+    }
+
+    @Test func exactTextMatchesEachInterpolationFreeGroup() throws {
+        let source = #""marker\(value)suffix"; "prefix\(value)marker"; "mark\(value)er"; "markers"; "marker\(value)marker""#
+        let report = try scan(source, match: #"{"kind":"stringLiteral","text":"marker"}"#)
+        #expect(report.violations.map(\.column) == [1, 25, 78])
+    }
+
+    @Test(arguments: ["prefix", "suffix"])
+    func identifierPatternsIncludeEqualNames(kind: String) throws {
+        let match = #"{"kind":"identifier","target":"token","pattern":{"kind":"\#(kind)","text":"Clock"}}"#
+        #expect(try scan("let `Clock` = 0\nlet Other = 0", match: match).violations.map(\.line) == [1])
+    }
+
+    @Test func canImportLocationsUseEachCalleeInCompoundConditions() throws {
+        let source = "#if DEBUG && canImport(Network) || canImport(Network.Submodule)\n#endif"
+        let report = try scan(source, match: importMatch(form: "canImport"))
+        #expect(report.violations.map(\.line) == [1, 1])
+        #expect(report.violations.map(\.column) == [14, 36])
+    }
+
+    @Test(arguments: ["type", "function"])
+    func declarationHeadersAreOutsideTheirOwnContext(kind: String) throws {
+        let declaration = kind == "type" ? "struct MarkerOwner: MarkerProtocol" : "func MarkerOwner(_ value: MarkerArgument = MarkerDefault()) -> MarkerResult"
+        let source = """
+        @MarkerAttribute
+        \(declaration) {
+            let MarkerBody = 0
+        }
+        """
+        let match = #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"Marker"}}"#
+        let inside = #","context":{"relation":"inside","kind":"\#(kind)","name":"MarkerOwner"}"#
+        let outside = #","context":{"relation":"outside","kind":"\#(kind)","name":"MarkerOwner"}"#
+        #expect(try scan(source, match: match, fields: inside).violations.map(\.line) == [3])
+        #expect(try scan(source, match: match, fields: outside).violations.map(\.line) == (kind == "type" ? [1, 2, 2] : [1, 2, 2, 2, 2]))
+        let nested = "struct MarkerOwner { \(source) }"
+        let outer = #","context":{"relation":"inside","kind":"type","name":"MarkerOwner"}"#
+        #expect(try scan(nested, match: match, fields: outer).violations.count == (kind == "type" ? 4 : 6))
+    }
+
+    @Test(arguments: ["public", "internal", "package", "@_exported"])
+    func importModifiersPreserveSpecificImportKind(modifier: String) throws {
+        let source = """
+        \(modifier) import struct Network.Connection
+        \(modifier) import Network
+        \(modifier) import func Network.connect
+        \(modifier) import struct NetworkExtension.Connection
+        """
+        #expect(try scan(source, match: importMatch(kind: "struct")).violations.map(\.line) == [1])
+        #expect(try scan(source, match: importMatch(kind: "module")).violations.map(\.line) == [2])
+        #expect(try scan(source, match: importMatch()).violations.map(\.line) == [1, 2, 3])
+    }
+
+    @Test func memberRulesComposeWithContextAndFileConditions() throws {
+        let match = #"{"kind":"member","name":["Service","run"]}"#
+        let source = """
+        import Foundation
+        struct Adapter { let action = Service.run }
+        struct Other { let action = Service.run; let ignored = Other.run }
+        """
+        let context = #","context":{"relation":"outside","kind":"type","name":"Adapter"}"#
+        let condition = #","when":{"imports":"Foundation"}"#
+        #expect(try scan(source, match: match, fields: context).violations.map(\.line) == [3])
+        #expect(try scan(source, match: match, fields: condition).violations.map(\.line) == [2, 3])
+        #expect(try scan(source, match: match, fields: context + condition).violations.map(\.line) == [3])
+        #expect(try scan(source.replacingOccurrences(of: "import Foundation", with: "import OtherModule"), match: match, fields: context + condition).violations.isEmpty)
+    }
+
+    @Test func canImportInFunctionBodyChecksOnlyCompilationConditions() throws {
+        let source = """
+        func run() {
+            #if DEBUG && canImport(Network)
+            let action = canImport(Network)
+            #elseif canImport(NetworkExtension)
+            #endif
+        }
+        """
+        let match = importMatch(form: "canImport")
+        let context = #","context":{"relation":"inside","kind":"function","name":"run"}"#
+        #expect(try scan(source, match: match).violations.map(\.line) == [2])
+        #expect(try scan(source, match: match, fields: context).violations.map(\.line) == [2])
+    }
+
+    @Test func multipleRulesShareAFileWithoutMixingResults() throws {
+        let json = #"""
+        {"version":2,"rules":[
+          {"id":"call","paths":["Sources"],"match":{"kind":"call","name":["Service","run"]},"when":{"imports":"Foundation"}},
+          {"id":"member","paths":["Sources"],"match":{"kind":"member","name":["Service","run"]},"context":{"relation":"inside","kind":"type","name":"Adapter"}},
+          {"id":"tokens","paths":["Sources"],"match":{"kind":"tokens","tokens":["Service",".","run"]}},
+          {"id":"attribute","paths":["Sources"],"match":{"kind":"requireAttribute","name":["MainActor"]},"when":{"imports":"Foundation"}}
+        ],"allowlist":[]}
+        """#
+        let configuration = try GuardrailConfiguration.decode(Data(json.utf8))
+        let source = "struct Adapter { func run() { Service.run() } }\nimport Foundation\n@MainActor struct Other {}"
+        func report(_ source: String) throws -> GuardrailReport {
+            try SourceGuardrails.scan(configuration: configuration, files: [GuardrailSource(file: RelativePath("Sources/File.swift"), text: source)])
+        }
+        let present = try report(source)
+        #expect(present.violations.map(\.rule) == ["call", "member", "tokens"])
+        #expect(present.violations.map(\.line) == [1, 1, 1])
+        let absent = try report(source.replacingOccurrences(of: "@MainActor ", with: ""))
+        #expect(absent.violations.map(\.rule) == ["attribute", "call", "member", "tokens"])
+        #expect(absent.violations.first?.column == 1)
+        #expect(try report(source.replacingOccurrences(of: "import Foundation", with: "import OtherModule")).violations.map(\.rule) == ["member", "tokens"])
+    }
+
     func configuration(match: String, fields: String = "", allowlist: String = "[]") throws -> GuardrailConfiguration {
         let json = #"{"version":2,"rules":[{"id":"rule","paths":["Sources"],"match":\#(match)\#(fields)}],"allowlist":\#(allowlist)}"#
         return try GuardrailConfiguration.decode(Data(json.utf8))

@@ -1,6 +1,6 @@
 import SwiftSyntax
 
-struct RuleMatcher: Decodable {
+struct RuleMatcher {
     enum Check {
         case occurrences(OccurrenceMatcher, LexicalContext?)
         case required(FileRequirement)
@@ -12,16 +12,19 @@ struct RuleMatcher: Decodable {
     private enum Keys: String, CodingKey { case kind, name }
     private enum AttributeKeys: String, CodingKey, CaseIterable { case kind, name }
 
-    init(from decoder: any Decoder) throws {
+    init(from decoder: any Decoder, context: LexicalContext?, condition: FileCondition?) throws {
         let values = try decoder.container(keyedBy: Keys.self)
         switch try values.decode(String.self, forKey: .kind) {
-        case "import": check = try ImportDocument(from: decoder).check
+        case "import": check = try ImportDocument(from: decoder, context: context).check
         case "requireAttribute":
             try decoder.rejectUnknownKeys(AttributeKeys.self)
             check = .required(.attribute(try values.decode(SyntaxName.self, forKey: .name)))
-        default: check = .occurrences(try OccurrenceMatcher(from: decoder), nil)
+        default: check = .occurrences(try OccurrenceMatcher(from: decoder), context)
         }
-        condition = nil
+        if case .required = check, context != nil {
+            throw GuardrailInputError("Required file presence cannot have a lexical context")
+        }
+        self.condition = condition
     }
 
     private init(check: Check, condition: FileCondition?) {
@@ -30,15 +33,6 @@ struct RuleMatcher: Decodable {
     }
 
     static func tokens(_ tokens: [CodeToken]) -> Self { Self(check: .occurrences(.tokens(tokens), nil), condition: nil) }
-
-    func applying(context: LexicalContext?, condition: FileCondition?) throws -> Self {
-        switch check {
-        case .occurrences(let matcher, _): return Self(check: .occurrences(matcher, context), condition: condition)
-        case .required(let requirement):
-            guard context == nil else { throw GuardrailInputError("Required file presence cannot have a lexical context") }
-            return Self(check: .required(requirement), condition: condition)
-        }
-    }
 }
 
 enum OccurrenceMatcher: Decodable {
@@ -176,14 +170,14 @@ enum ImportPattern {
     case either(ModuleSelection)
 }
 
-private struct ImportDocument: Decodable {
+private struct ImportDocument {
     enum Form: String, Decodable { case declaration, canImport, either }
     enum Presence: String, Decodable { case forbidden, required }
     let check: RuleMatcher.Check
 
     private enum CodingKeys: String, CodingKey, CaseIterable { case kind, module, form, importKind, presence }
 
-    init(from decoder: any Decoder) throws {
+    init(from decoder: any Decoder, context: LexicalContext?) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let module = try values.decode(ModuleSelection.self, forKey: .module)
@@ -197,7 +191,7 @@ private struct ImportDocument: Decodable {
             pattern = form == .canImport ? .canImport(module) : .either(module)
         }
         switch try values.decode(Presence.self, forKey: .presence) {
-        case .forbidden: check = .occurrences(.import(pattern), nil)
+        case .forbidden: check = .occurrences(.import(pattern), context)
         case .required: check = .required(.import(pattern))
         }
     }

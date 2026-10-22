@@ -2,11 +2,19 @@ import SwiftSyntax
 
 enum CodeTokens {
     static func starts(in syntax: some SyntaxProtocol, matching tokens: [CodeToken]) -> [TokenSyntax] {
+        starts(in: runs(in: syntax), matching: tokens)
+    }
+
+    static func runs(in syntax: some SyntaxProtocol) -> [[TokenSyntax]] {
         let visitor = CodeTokenVisitor(viewMode: .sourceAccurate)
         visitor.walk(syntax)
+        return visitor.runs
+    }
+
+    static func starts(in runs: [[TokenSyntax]], matching tokens: [CodeToken]) -> [TokenSyntax] {
         let pattern = tokens.map(\.text)
         var starts: [TokenSyntax] = []
-        for run in visitor.runs where run.count >= pattern.count {
+        for run in runs where run.count >= pattern.count {
             for start in 0...(run.count - pattern.count) {
                 let window = run[start..<(start + pattern.count)]
                 if window.map(\.guardrailText) == pattern { starts.append(run[start]) }

@@ -97,8 +97,8 @@ validation applies unchanged. Unknown fields and incompatible fields fail closed
 `{"kind":"tokens","tokens":["Task",".","sleep"]}` retains v1 token semantics.
 `identifier` requires `target` (`token` or `function`) and a `pattern` with
 `kind` (`prefix` or `suffix`) and `text` (one Swift identifier). These compare
-literal identifier spelling, normalizing backticks; they have no wildcard or
-regular expression syntax. `token` includes identifier declarations and uses;
+literal identifier spelling, including identifiers equal to `text`, normalizing
+backticks; they have no wildcard or regular expression syntax. `token` includes identifier declarations and uses;
 `function` checks only function declaration names. Comments, string text and
 regex contents do not count. Multiline declarations are handled by SwiftSyntax.
 
@@ -165,8 +165,11 @@ An occurrence rule may add a sibling `context`:
 ```
 
 `relation` is `inside` or `outside`; `kind` is `type` or `function`. A match is
-inside when its token has an enclosing declaration with that name. Types include
-structs, classes, actors, enums, protocols and extensions; extensions use the
+inside when its token is in the body or member block of an enclosing declaration
+with that name. A declaration's own header (including its name, attributes,
+parameter defaults and inheritance clause) is outside its own context; it still
+retains any surrounding context. Types include structs, classes, actors, enums,
+protocols and extensions; extensions use the
 final type component. Function overloads share a name. Nested types, nested
 functions and closures retain their enclosing context. `outside` is the
 complement, including top-level code. Context names are single Swift names.
@@ -174,8 +177,9 @@ The same filter works with token and identifier rules.
 
 `{"kind":"argument","call":["schedule"],"label":"minutes",`
 `"validation":"positiveIntegerLiteral"}` checks each matching call for exactly
-one argument with that label. Missing, repeated and invalid values report once
-at the call. `positiveIntegerLiteral` requires a positive `IntegerLiteralExprSyntax`
+one argument with that label, counting both parenthesized arguments and labeled
+trailing closures. Closure expressions fail both literal validators. Missing,
+repeated and invalid values report once at the call. `positiveIntegerLiteral` requires a positive `IntegerLiteralExprSyntax`
 whose SwiftSyntax `representedLiteralValue` fits `Int`; decimal, binary, octal,
 hexadecimal and separators are supported. Expressions, signed prefixes,
 parentheses, variables, floats, zero and overflow fail. `nonemptyStringLiteral`
@@ -210,8 +214,10 @@ module component of the first argument; optional version arguments are ignored.
 A similarly named call in executable code, a comment or string does not count.
 Every compilation branch is inspected; conditions are never evaluated.
 
-`presence: "forbidden"` reports each matching declaration/condition at its first
-token. `presence: "required"` reports once at file location 1:1 when no selected
+`presence: "forbidden"` reports a declaration at its first token (including any
+attribute or access modifier) and a condition match at that call's `canImport`
+callee, including each selected call in a compound condition.
+`presence: "required"` reports once at file location 1:1 when no selected
 declaration/condition exists. A Foundation-only policy uses
 `module: {"kind":"except","name":"Foundation"}` with `form: "declaration"`;
 an all-module condition ban uses `module: {"kind":"any"}` with `form: "canImport"`.
@@ -246,8 +252,9 @@ specify exactly one nonempty `text` string or nonempty `tokens` array.
 The matcher groups consecutive typed `StringSegmentSyntax` segments and asks
 SwiftParser for their represented value, resolving escapes and multiline
 indentation. It never joins across an `ExpressionSegmentSyntax` interpolation.
-`text` requires equality with a complete decoded group. `tokens` parses each
-decoded group with SwiftParser and uses the same code-token matcher as v1,
+`text` compares each interpolation-free group on its own and requires equality
+with a complete decoded group; for example, `"marker\(value)suffix"` matches
+`text: "marker"`. `tokens` parses each decoded group with SwiftParser and uses the same code-token matcher as v1,
 ignoring embedded Swift comments, strings and regexes. Content can be an
 incomplete Swift fragment; it need not compile or form a complete syntax tree.
 No regular expression is applied to source or literal content.

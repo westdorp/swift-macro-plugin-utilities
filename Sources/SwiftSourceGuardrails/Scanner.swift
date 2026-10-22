@@ -23,8 +23,9 @@ enum SourceGuardrails {
                 }.joined(separator: "\n")
                 throw GuardrailInputError("Cannot scan malformed Swift: \(details)")
             }
-            for rule in rules {
-                for position in rule.matcher.positions(in: tree) {
+            let positions = RuleMatcher.positions(in: tree, matchers: rules.map(\.matcher))
+            for (rule, rulePositions) in zip(rules, positions) {
+                for position in rulePositions {
                     let location = locations.location(for: position)
                     matches.append(.init(file: file.file.value, line: location.line, column: location.column, rule: rule.id))
                 }

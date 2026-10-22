@@ -2,59 +2,59 @@ import SwiftParser
 import SwiftSyntax
 
 extension RuleMatcher {
-    func positions(in tree: SourceFileSyntax) -> [AbsolutePosition] {
-        if let condition, !condition.holds(in: tree) { return [] }
-        switch check {
-        case .occurrences(let matcher, let context):
-            return matcher.matchingTokens(in: tree)
-                .filter { context?.allows($0) ?? true }
-                .map(\.positionAfterSkippingLeadingTrivia)
-        case .required(let requirement):
-            return requirement.isPresent(in: tree) ? [] : [AbsolutePosition(utf8Offset: 0)]
+    static func positions(in tree: SourceFileSyntax, matchers: [Self]) -> [[AbsolutePosition]] {
+        let visitor = RuleMatchVisitor(matchers: matchers)
+        visitor.walk(tree)
+        let needsTokens = matchers.contains {
+            if case .occurrences(.tokens, _) = $0.check { return true }
+            return false
+        }
+        let runs = needsTokens ? CodeTokens.runs(in: tree) : []
+        return matchers.enumerated().map { index, matcher in
+            if let condition = matcher.condition, !visitor.imports.contains(condition.imports.text) { return [] }
+            switch matcher.check {
+            case .occurrences(let occurrence, let context):
+                let tokens: [TokenSyntax]
+                if case .tokens(let pattern) = occurrence { tokens = CodeTokens.starts(in: runs, matching: pattern) }
+                else { tokens = visitor.tokens[index] }
+                return tokens.filter { context?.allows($0) ?? true }.map(\.positionAfterSkippingLeadingTrivia)
+            case .required:
+                return visitor.tokens[index].isEmpty ? [AbsolutePosition(utf8Offset: 0)] : []
+            }
         }
     }
 }
 
 private extension OccurrenceMatcher {
-    func matchingTokens(in tree: SourceFileSyntax) -> [TokenSyntax] {
+    func match(_ syntax: Syntax) -> TokenSyntax? {
         switch self {
-        case .tokens(let tokens):
-            return CodeTokens.starts(in: tree, matching: tokens)
+        case .tokens: return nil
         case .identifier(let pattern, let target):
-            return SyntaxMatches.tokens(in: tree) { syntax in
-                let token: TokenSyntax?
-                switch target {
-                case .token: token = syntax.as(TokenSyntax.self)
-                case .function: token = syntax.as(FunctionDeclSyntax.self)?.name
-                }
-                return token.flatMap { pattern.matches($0) ? $0 : nil }
+            let token: TokenSyntax?
+            switch target {
+            case .token: token = syntax.as(TokenSyntax.self)
+            case .function: token = syntax.as(FunctionDeclSyntax.self)?.name
             }
+            return token.flatMap { pattern.matches($0) ? $0 : nil }
         case .call(let name):
-            return SyntaxMatches.tokens(in: tree) { syntax in
-                guard let call = syntax.as(FunctionCallExprSyntax.self), name.matches(call.calledExpression) else { return nil }
-                return call.calledExpression.firstToken(viewMode: .sourceAccurate)
-            }
+            guard let call = syntax.as(FunctionCallExprSyntax.self), name.matches(call.calledExpression) else { return nil }
+            return call.calledExpression.firstToken(viewMode: .sourceAccurate)
         case .member(let name):
-            return SyntaxMatches.tokens(in: tree) { syntax in
-                guard let member = syntax.as(MemberAccessExprSyntax.self), name.matches(ExprSyntax(member)) else { return nil }
-                return member.firstToken(viewMode: .sourceAccurate)
-            }
+            guard let member = syntax.as(MemberAccessExprSyntax.self), name.matches(ExprSyntax(member)) else { return nil }
+            return member.firstToken(viewMode: .sourceAccurate)
         case .argument(let name, let label, let validation):
-            return SyntaxMatches.tokens(in: tree) { syntax in
-                guard let call = syntax.as(FunctionCallExprSyntax.self), name.matches(call.calledExpression) else { return nil }
-                let arguments = call.arguments.filter { $0.label?.guardrailText == label.text }
-                if arguments.count == 1, let argument = arguments.first, validation.accepts(argument.expression) { return nil }
-                return call.calledExpression.firstToken(viewMode: .sourceAccurate)
-            }
+            guard let call = syntax.as(FunctionCallExprSyntax.self), name.matches(call.calledExpression) else { return nil }
+            let arguments = call.arguments.filter { $0.label?.guardrailText == label.text }.map(\.expression)
+                + call.additionalTrailingClosures.filter { $0.label.guardrailText == label.text }.map { ExprSyntax($0.closure) }
+            if arguments.count == 1, let argument = arguments.first, validation.accepts(argument) { return nil }
+            return call.calledExpression.firstToken(viewMode: .sourceAccurate)
         case .import(let pattern):
-            return SyntaxMatches.tokens(in: tree, match: pattern.match)
+            return pattern.match(syntax)
         case .stringLiteral(let pattern):
-            return SyntaxMatches.tokens(in: tree) { syntax in
-                guard let literal = syntax.as(StringLiteralExprSyntax.self),
-                    literal.guardrailLiteralGroups.contains(where: pattern.matches)
-                else { return nil }
-                return literal.openingPounds ?? literal.openingQuote
-            }
+            guard let literal = syntax.as(StringLiteralExprSyntax.self),
+                literal.guardrailLiteralGroups.contains(where: pattern.matches)
+            else { return nil }
+            return literal.openingPounds ?? literal.openingQuote
         }
     }
 }
@@ -86,29 +86,16 @@ private extension StringLiteralExprSyntax {
     }
 }
 
-private extension FileCondition {
-    func holds(in tree: SourceFileSyntax) -> Bool {
-        !SyntaxMatches.tokens(in: tree, match: { syntax in
-            guard let declaration = syntax.as(ImportDeclSyntax.self),
-                let module = declaration.path.first?.name, module.guardrailText == imports.text
-            else { return nil }
-            return module
-        }).isEmpty
-    }
-}
-
 private extension FileRequirement {
-    func isPresent(in tree: SourceFileSyntax) -> Bool {
+    func match(_ syntax: Syntax) -> TokenSyntax? {
         switch self {
         case .attribute(let name):
-            return !SyntaxMatches.tokens(in: tree, match: { syntax in
-                guard let attribute = syntax.as(AttributeSyntax.self),
-                    SyntaxName.components(of: attribute.attributeName) == name.components
-                else { return nil }
-                return attribute.atSign
-            }).isEmpty
+            guard let attribute = syntax.as(AttributeSyntax.self),
+                SyntaxName.components(of: attribute.attributeName) == name.components
+            else { return nil }
+            return attribute.atSign
         case .import(let pattern):
-            return !SyntaxMatches.tokens(in: tree, match: pattern.match).isEmpty
+            return pattern.match(syntax)
         }
     }
 }
@@ -162,6 +149,7 @@ extension SyntaxName {
 
     static func components(of expression: ExprSyntax) -> [String]? {
         if let reference = expression.as(DeclReferenceExprSyntax.self) { return [reference.baseName.guardrailText] }
+        if expression.is(SuperExprSyntax.self) { return ["super"] }
         if let generic = expression.as(GenericSpecializationExprSyntax.self) { return components(of: generic.expression) }
         if let member = expression.as(MemberAccessExprSyntax.self) {
             guard let base = member.base else { return [member.declName.baseName.guardrailText] }
@@ -194,23 +182,25 @@ private extension ArgumentValidation {
 
 private extension LexicalContext {
     func allows(_ token: TokenSyntax) -> Bool {
-        var ancestor = token.parent
+        var child = Syntax(token)
         var isInside = false
-        while let node = ancestor {
+        while let node = child.parent {
             let candidate: String?
             switch kind {
-            case .function: candidate = node.as(FunctionDeclSyntax.self)?.name.guardrailText
+            case .function:
+                let declaration = node.as(FunctionDeclSyntax.self)
+                candidate = declaration?.body?.id == child.id ? declaration?.name.guardrailText : nil
             case .type:
-                if let declaration = node.as(StructDeclSyntax.self) { candidate = declaration.name.guardrailText }
-                else if let declaration = node.as(ClassDeclSyntax.self) { candidate = declaration.name.guardrailText }
-                else if let declaration = node.as(ActorDeclSyntax.self) { candidate = declaration.name.guardrailText }
-                else if let declaration = node.as(EnumDeclSyntax.self) { candidate = declaration.name.guardrailText }
-                else if let declaration = node.as(ProtocolDeclSyntax.self) { candidate = declaration.name.guardrailText }
-                else if let declaration = node.as(ExtensionDeclSyntax.self) { candidate = SyntaxName.components(of: declaration.extendedType)?.last }
+                if let declaration = node.as(StructDeclSyntax.self), declaration.memberBlock.id == child.id { candidate = declaration.name.guardrailText }
+                else if let declaration = node.as(ClassDeclSyntax.self), declaration.memberBlock.id == child.id { candidate = declaration.name.guardrailText }
+                else if let declaration = node.as(ActorDeclSyntax.self), declaration.memberBlock.id == child.id { candidate = declaration.name.guardrailText }
+                else if let declaration = node.as(EnumDeclSyntax.self), declaration.memberBlock.id == child.id { candidate = declaration.name.guardrailText }
+                else if let declaration = node.as(ProtocolDeclSyntax.self), declaration.memberBlock.id == child.id { candidate = declaration.name.guardrailText }
+                else if let declaration = node.as(ExtensionDeclSyntax.self), declaration.memberBlock.id == child.id { candidate = SyntaxName.components(of: declaration.extendedType)?.last }
                 else { candidate = nil }
             }
             if candidate == name.text { isInside = true; break }
-            ancestor = node.parent
+            child = node
         }
         switch relation {
         case .inside: return isInside
@@ -219,23 +209,29 @@ private extension LexicalContext {
     }
 }
 
-private final class SyntaxMatches: SyntaxAnyVisitor {
-    let match: (Syntax) -> TokenSyntax?
-    var tokens: [TokenSyntax] = []
+private final class RuleMatchVisitor: SyntaxAnyVisitor {
+    let matchers: [RuleMatcher]
+    private(set) var tokens: [[TokenSyntax]]
+    private(set) var imports: Set<String> = []
 
-    private init(match: @escaping (Syntax) -> TokenSyntax?) {
-        self.match = match
+    init(matchers: [RuleMatcher]) {
+        self.matchers = matchers
+        tokens = Array(repeating: [], count: matchers.count)
         super.init(viewMode: .sourceAccurate)
     }
 
-    static func tokens(in tree: SourceFileSyntax, match: @escaping (Syntax) -> TokenSyntax?) -> [TokenSyntax] {
-        let visitor = SyntaxMatches(match: match)
-        visitor.walk(tree)
-        return visitor.tokens
-    }
-
     override func visitAny(_ node: Syntax) -> SyntaxVisitorContinueKind {
-        if let token = match(node) { tokens.append(token) }
+        if let declaration = node.as(ImportDeclSyntax.self), let module = declaration.path.first?.name {
+            imports.insert(module.guardrailText)
+        }
+        for (index, matcher) in matchers.enumerated() {
+            let token: TokenSyntax?
+            switch matcher.check {
+            case .occurrences(let occurrence, _): token = occurrence.match(node)
+            case .required(let requirement): token = requirement.match(node)
+            }
+            if let token { tokens[index].append(token) }
+        }
         return .visitChildren
     }
 }
