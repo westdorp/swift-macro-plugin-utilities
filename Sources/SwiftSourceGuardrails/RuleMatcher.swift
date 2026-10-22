@@ -48,8 +48,9 @@ enum OccurrenceMatcher: Decodable {
     case member(SyntaxName)
     case argument(SyntaxName, SwiftName, ArgumentValidation)
     case `import`(ImportPattern)
+    case stringLiteral(StringContentPattern)
 
-    private enum Kind: String, Decodable { case tokens, identifier, call, member, argument }
+    private enum Kind: String, Decodable { case tokens, identifier, call, member, argument, stringLiteral }
     private enum Keys: String, CodingKey { case kind, tokens, pattern, target, name, call, label, validation }
     private enum TokenKeys: String, CodingKey, CaseIterable { case kind, tokens }
     private enum IdentifierKeys: String, CodingKey, CaseIterable { case kind, pattern, target }
@@ -83,6 +84,31 @@ enum OccurrenceMatcher: Decodable {
                 try values.decode(SwiftName.self, forKey: .label),
                 try values.decode(ArgumentValidation.self, forKey: .validation)
             )
+        case .stringLiteral:
+            self = .stringLiteral(try StringContentPattern(from: decoder))
+        }
+    }
+}
+
+enum StringContentPattern: Decodable {
+    case text(String)
+    case tokens([CodeToken])
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case kind, text, tokens }
+
+    init(from decoder: any Decoder) throws {
+        try decoder.rejectUnknownKeys(CodingKeys.self)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch (values.contains(.text), values.contains(.tokens)) {
+        case (true, false):
+            let text = try values.decode(String.self, forKey: .text)
+            guard !text.isEmpty else { throw GuardrailInputError("String text pattern must be nonempty") }
+            self = .text(text)
+        case (false, true):
+            let tokens = try values.decode([CodeToken].self, forKey: .tokens)
+            guard !tokens.isEmpty else { throw GuardrailInputError("String token pattern must be nonempty") }
+            self = .tokens(tokens)
+        default: throw GuardrailInputError("String literal matcher needs exactly one of text or tokens")
         }
     }
 }

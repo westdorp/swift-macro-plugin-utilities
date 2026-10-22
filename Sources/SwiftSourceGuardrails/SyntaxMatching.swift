@@ -48,6 +48,40 @@ private extension OccurrenceMatcher {
             }
         case .import(let pattern):
             return SyntaxMatches.tokens(in: tree, match: pattern.match)
+        case .stringLiteral(let pattern):
+            return SyntaxMatches.tokens(in: tree) { syntax in
+                guard let literal = syntax.as(StringLiteralExprSyntax.self),
+                    literal.guardrailLiteralGroups.contains(where: pattern.matches)
+                else { return nil }
+                return literal.openingPounds ?? literal.openingQuote
+            }
+        }
+    }
+}
+
+private extension StringContentPattern {
+    func matches(_ value: String) -> Bool {
+        switch self {
+        case .text(let text): return value == text
+        case .tokens(let tokens): return !CodeTokens.starts(in: Parser.parse(source: value), matching: tokens).isEmpty
+        }
+    }
+}
+
+private extension StringLiteralExprSyntax {
+    var guardrailLiteralGroups: [String] {
+        var groups: [[StringLiteralSegmentListSyntax.Element]] = [[]]
+        for segment in segments {
+            switch segment {
+            case .stringSegment: groups[groups.count - 1].append(segment)
+            case .expressionSegment: groups.append([])
+            }
+        }
+        return groups.filter { !$0.isEmpty }.map { segments in
+            var literal = self
+            literal.segments = StringLiteralSegmentListSyntax(segments)
+            // SwiftParser provides a value for validated literals without interpolation.
+            return literal.representedLiteralValue!
         }
     }
 }

@@ -196,6 +196,35 @@ rules accept file conditions but reject lexical contexts, because their
 requirement applies to the whole file. Allowlists count each missing-presence
 finding as one violation.
 
+### String literal contents
+
+```json
+{"kind":"stringLiteral", "tokens":["Task",".","sleep"]}
+```
+
+This matches `StringLiteralExprSyntax` contents such as
+`"try await Task.sleep(for: .seconds(1))"`, including escaped, raw and multiline
+forms. The same text in a source comment or regex does not count. A rule must
+specify exactly one nonempty `text` string or nonempty `tokens` array.
+
+The matcher groups consecutive typed `StringSegmentSyntax` segments and asks
+SwiftParser for their represented value, resolving escapes and multiline
+indentation. It never joins across an `ExpressionSegmentSyntax` interpolation.
+`text` requires equality with a complete decoded group. `tokens` parses each
+decoded group with SwiftParser and uses the same code-token matcher as v1,
+ignoring embedded Swift comments, strings and regexes. Content can be an
+incomplete Swift fragment; it need not compile or form a complete syntax tree.
+No regular expression is applied to source or literal content.
+
+Each matching literal reports once at its original opening delimiter, regardless
+of multiple groups or token starts. Interpolation expressions remain ordinary
+code; nested literals within them are checked independently. For example,
+`"Task.\(name)sleep()"` cannot match `["Task",".","sleep"]`, while
+`"prefix \(name)Task.sleep()"` can. Compiler-directive
+`SimpleStringLiteralExprSyntax` nodes, such as the filename in `#sourceLocation`,
+are excluded. File conditions and lexical contexts work as for other occurrence
+rules. Missing-presence rules never parse generated code.
+
 ## Swift classification and limits
 
 SwiftParser determines code, comments, normal/escaped/raw/multiline strings, and

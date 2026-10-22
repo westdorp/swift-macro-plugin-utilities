@@ -3,6 +3,50 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct Version2Tests {
+    @Test func generatedStringCodeUsesDecodedSegmentsAndSwiftParser() throws {
+        let match = #"{"kind":"stringLiteral","tokens":["Task",".","sleep"]}"#
+        let report = try scan(fixture("v2-strings"), match: match)
+        #expect(report.violations.map(\.line) == [1, 2, 3, 4, 12, 13, 17, 18, 19, 23, 24, 25])
+        #expect(report.violations.filter { $0.line == 18 }.count == 1)
+        #expect(try scan("// \"Task" + ".sleep()\"", match: match).violations.isEmpty)
+    }
+
+    @Test func exactStringContentIsDecodedAndDoesNotCrossInterpolation() throws {
+        let text = "try await Task" + ".sleep(for: .seconds(1))"
+        let encoded = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)
+        let match = #"{"kind":"stringLiteral","text":\#(encoded)}"#
+        #expect(try scan(fixture("v2-strings"), match: match).violations.map(\.line) == [1, 2, 3, 12, 13, 17])
+        let multiline = #"{"kind":"stringLiteral","text":"try await Task\n.sleep(for: .seconds(1))"}"#
+        #expect(try scan(fixture("v2-strings"), match: multiline).violations.map(\.line) == [4, 19])
+    }
+
+    @Test func stringAndCodeRulesKeepSeparateBoundaries() throws {
+        let match = #"{"kind":"call","name":["Task","sleep"]}"#
+        #expect(try scan(fixture("v2-strings"), match: match).violations.map(\.line) == [10])
+        let fields = #","context":{"relation":"inside","kind":"function","name":"generate"}"#
+        let source = "func generate() { let text = \"Task" + ".sleep()\" }\nfunc other() { let text = \"Task" + ".sleep()\" }"
+        #expect(try scan(source, match: #"{"kind":"stringLiteral","tokens":["Task",".","sleep"]}"#, fields: fields).violations.map(\.line) == [1])
+    }
+
+    @Test func compilerDirectiveStringsAreNotGeneratedStringLiterals() throws {
+        let match = #"{"kind":"stringLiteral","text":"marker"}"#
+        #expect(try scan("#sourceLocation(file: \"marker\", line: 1)\nlet marker = 0", match: match).violations.isEmpty)
+        #expect(try scan("let text = \"marker\"", match: match).violations.count == 1)
+    }
+
+    @Test(arguments: [
+        #"{"kind":"stringLiteral"}"#,
+        #"{"kind":"stringLiteral","text":""}"#,
+        #"{"kind":"stringLiteral","text":null}"#,
+        #"{"kind":"stringLiteral","tokens":[]}"#,
+        #"{"kind":"stringLiteral","tokens":["Task"],"text":"Task"}"#,
+        #"{"kind":"stringLiteral","regex":"Task.*"}"#,
+        #"{"kind":"stringLiteral","tokens":["Task"],"extra":true}"#
+    ])
+    func malformedStringPatternsAreRejected(match: String) {
+        #expect(throws: GuardrailInputError.self) { try configuration(match: match) }
+    }
+
     @Test(arguments: [
         ("declaration", "any", [1, 2, 6, 22, 23]),
         ("declaration", "module", [1, 2, 23]),
