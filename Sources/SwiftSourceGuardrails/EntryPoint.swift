@@ -5,10 +5,10 @@ import Foundation
 struct SwiftSourceGuardrails: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "swift-source-guardrails",
-        abstract: "Check Swift code tokens against repository-owned bans and counted exceptions."
+        abstract: "Check Swift syntax against repository-owned policies and counted exceptions."
     )
 
-    @Option(help: "Path to the version 1 JSON guardrail configuration.")
+    @Option(help: "Path to a version 1 or 2 JSON guardrail configuration.")
     var config: String
 
     @Option(help: "Source root; rule paths are relative to this directory.")

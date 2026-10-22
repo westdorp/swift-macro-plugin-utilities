@@ -33,6 +33,7 @@ struct RelativePath: Hashable, Decodable {
 
 struct CodeToken: Decodable {
     let text: String
+    let kind: TokenKind
 
     init(from decoder: any Decoder) throws {
         let text = try decoder.singleValueContainer().decode(String.self)
@@ -53,29 +54,79 @@ struct CodeToken: Decodable {
             throw GuardrailInputError("Each rule token must be exactly one Swift token without trivia: \(text)")
         }
         self.text = token.guardrailText
+        self.kind = token.tokenKind
     }
 }
 
 struct GuardrailConfiguration: Decodable {
-    struct Rule: Decodable {
+    struct Rule {
         let id: String
-        let tokens: [CodeToken]
+        let matcher: RuleMatcher
         let paths: [RelativePath]
 
+        func applies(to file: RelativePath) -> Bool { paths.contains { $0.contains(file) } }
+    }
+
+    private struct LegacyRule: Decodable {
+        let rule: Rule
         enum CodingKeys: String, CodingKey, CaseIterable { case id, tokens, paths }
 
         init(from decoder: any Decoder) throws {
             try decoder.rejectUnknownKeys(CodingKeys.self)
             let values = try decoder.container(keyedBy: CodingKeys.self)
-            id = try values.decode(String.self, forKey: .id)
-            tokens = try values.decode([CodeToken].self, forKey: .tokens)
-            paths = try values.decode([RelativePath].self, forKey: .paths)
+            let id = try values.decode(String.self, forKey: .id)
+            let tokens = try values.decode([CodeToken].self, forKey: .tokens)
+            let paths = try values.decode([RelativePath].self, forKey: .paths)
             guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 !tokens.isEmpty, !paths.isEmpty
             else { throw GuardrailInputError("Rule id, tokens and paths must be nonempty") }
+            rule = Rule(id: id, matcher: .tokens(tokens), paths: paths)
+        }
+    }
+
+    private struct RuleDocument: Decodable {
+        enum Scope {
+            case paths([RelativePath])
+            case named(String)
         }
 
-        func applies(to file: RelativePath) -> Bool { paths.contains { $0.contains(file) } }
+        let id: String
+        let matcher: RuleMatcher
+        let scope: Scope
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case id, match, paths, scope, context, when }
+
+        init(from decoder: any Decoder) throws {
+            try decoder.rejectUnknownKeys(CodingKeys.self)
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            id = try values.decode(String.self, forKey: .id)
+            guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw GuardrailInputError("Rule id must be nonblank")
+            }
+            let context = values.contains(.context) ? try values.decode(LexicalContext.self, forKey: .context) : nil
+            let condition = values.contains(.when) ? try values.decode(FileCondition.self, forKey: .when) : nil
+            matcher = try RuleMatcher(from: values.superDecoder(forKey: .match), context: context, condition: condition)
+            switch (values.contains(.paths), values.contains(.scope)) {
+            case (true, false):
+                let paths = try values.decode([RelativePath].self, forKey: .paths)
+                guard !paths.isEmpty else { throw GuardrailInputError("Rule paths must be nonempty") }
+                scope = .paths(paths)
+            case (false, true):
+                scope = .named(try values.decode(String.self, forKey: .scope))
+            default: throw GuardrailInputError("Rule needs exactly one of paths or scope")
+            }
+        }
+
+        func resolved(scopes: [String: [RelativePath]]) throws -> Rule {
+            let paths: [RelativePath]
+            switch scope {
+            case .paths(let values): paths = values
+            case .named(let name):
+                guard let values = scopes[name] else { throw GuardrailInputError("Unknown scope set: \(name)") }
+                paths = values
+            }
+            return Rule(id: id, matcher: matcher, paths: paths)
+        }
     }
 
     struct Allowance: Decodable {
@@ -102,14 +153,27 @@ struct GuardrailConfiguration: Decodable {
     let rules: [Rule]
     let allowlist: [Allowance]
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case version, rules, allowlist }
+    enum CodingKeys: String, CodingKey, CaseIterable { case version, rules, allowlist, scopes }
+    private enum LegacyKeys: String, CodingKey, CaseIterable { case version, rules, allowlist }
 
     init(from decoder: any Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decode(Int.self, forKey: .version)
-        guard version == 1 else { throw GuardrailInputError("Supported configuration version is 1; got \(version)") }
-        rules = try values.decode([Rule].self, forKey: .rules)
+        switch version {
+        case 1:
+            try decoder.rejectUnknownKeys(LegacyKeys.self)
+            rules = try values.decode([LegacyRule].self, forKey: .rules).map(\.rule)
+        case 2:
+            let scopes = values.contains(.scopes) ? try values.decode([String: [RelativePath]].self, forKey: .scopes) : [:]
+            for (name, paths) in scopes {
+                guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !paths.isEmpty else {
+                    throw GuardrailInputError("Scope sets need nonblank names and nonempty paths")
+                }
+            }
+            rules = try values.decode([RuleDocument].self, forKey: .rules).map { try $0.resolved(scopes: scopes) }
+        default: throw GuardrailInputError("Supported configuration versions are 1 and 2; got \(version)")
+        }
         allowlist = try values.decode([Allowance].self, forKey: .allowlist)
         guard !rules.isEmpty, Set(rules.map(\.id)).count == rules.count else {
             throw GuardrailInputError("Configuration needs nonempty rules with unique ids")
@@ -143,7 +207,7 @@ private struct AnyKey: CodingKey {
     init?(intValue: Int) { return nil }
 }
 
-private extension Decoder {
+extension Decoder {
     func rejectUnknownKeys<Key: CodingKey & CaseIterable>(_ type: Key.Type) throws {
         let keys = try container(keyedBy: AnyKey.self).allKeys.map(\.stringValue)
         let unknown = Set(keys).subtracting(Key.allCases.map(\.stringValue)).sorted()

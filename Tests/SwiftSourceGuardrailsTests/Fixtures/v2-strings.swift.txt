@@ -1,0 +1,25 @@
+let ordinary = "try await Task.sleep(for: .seconds(1))"
+let raw = #"try await Task.sleep(for: .seconds(1))"#
+let escaped = "try await Task.\u{73}leep(for: .seconds(1))"
+let multiline = """
+try await Task
+.sleep(for: .seconds(1))
+"""
+let ignored = "try await OtherTask.sleep(for: .seconds(1))"
+// let comment = "try await Task.sleep(for: .seconds(1))"
+let interpolation = "prefix \(try await Task.sleep(for: .seconds(1))) suffix"
+let split = "Task.\(name)sleep(for: .seconds(1))"
+let segment = "prefix \(name)try await Task.sleep(for: .seconds(1))"
+let inner = "outside \(consume("try await Task.sleep(for: .seconds(1))", value))"
+let codeComment = "// Task.sleep(for: .seconds(1))"
+let codeString = #"let text = "Task.sleep(for: .seconds(1))""#
+let regex = /Task.sleep("quoted")/
+let rawInterpolation = ##"before \##(name)try await Task.sleep(for: .seconds(1))"##
+let repeated = "Task.sleep(); Task.sleep()"
+let rawMultiline = #"""
+try await Task
+.sleep(for: .seconds(1))
+"""#
+let parentheses = "Task. // comment\n sleep()"
+let stringText = "Task.sleep"
+let fragment = "words Task.sleep more words"
