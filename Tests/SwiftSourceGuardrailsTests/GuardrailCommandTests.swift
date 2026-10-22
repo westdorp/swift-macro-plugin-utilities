@@ -3,6 +3,21 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct GuardrailCommandTests {
+    @Test func namedScopeIncludesNewDescendantsWithoutRuleEdits() throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        let config = #"{"version":2,"scopes":{"production":["Sources"]},"rules":[{"id":"names","scope":"production","match":{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"Forbidden"}}}],"allowlist":[]}"#
+        try fixture.write("guardrails.json", config)
+        try fixture.write("Sources/Existing.swift", "let ordinary = 0")
+        #expect(GuardrailCommand.scan(config: fixture.config, root: fixture.root).exitCode == 0)
+        try fixture.write("Sources/New/Nested.swift", "struct ForbiddenNewType {}")
+        try fixture.write("SourcesOther/File.swift", "struct ForbiddenOutOfScope {}")
+        let report = GuardrailCommand.scan(config: fixture.config, root: fixture.root)
+        #expect(report.scannedFiles == 2)
+        #expect(report.violations.map(\.file) == ["Sources/New/Nested.swift"])
+        #expect(report.violations.map(\.rule) == ["names"])
+    }
+
     @Test(arguments: [0, 1, 2])
     func entryPointPreservesReportAndExitStatus(scanExitCode: Int32) throws {
         let fixture = try CommandFixture()

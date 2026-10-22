@@ -24,8 +24,8 @@ enum SourceGuardrails {
                 throw GuardrailInputError("Cannot scan malformed Swift: \(details)")
             }
             for rule in rules {
-                for token in CodeTokens.starts(in: tree, matching: rule.tokens) {
-                    let location = locations.location(for: token.positionAfterSkippingLeadingTrivia)
+                for position in rule.matcher.positions(in: tree) {
+                    let location = locations.location(for: position)
                     matches.append(.init(file: file.file.value, line: location.line, column: location.column, rule: rule.id))
                 }
             }

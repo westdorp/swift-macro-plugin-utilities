@@ -66,6 +66,47 @@ Only an exact count suppresses those matches. Too few, too many, a removed file
 or a now-unused allowance fails the check. Other files remain subject to the
 rule. A count mismatch reports the actual count and leaves matches visible.
 
+## Configuration version 2
+
+Version 1 remains supported with identical matching and output. Version 2 uses
+tagged `match` objects and can share literal path lists through named scope sets:
+
+```json
+{
+  "version": 2,
+  "scopes": {"production": ["Sources"]},
+  "rules": [
+    {
+      "id": "clock-names",
+      "scope": "production",
+      "match": {"kind": "identifier", "target": "token",
+                "pattern": {"kind": "suffix", "text": "Clock"}}
+    }
+  ],
+  "allowlist": []
+}
+```
+
+Every rule requires `id`, `match`, and exactly one of `paths` or `scope`.
+`scopes` is optional; each named set has a nonblank name and nonempty path list.
+Scope references must exist. Rules resolve their scope before normal recursive
+file discovery, so a new file under `Sources` is automatically covered. Unused
+sets are validated as paths but are not discovered. Existing path and allowance
+validation applies unchanged. Unknown fields and incompatible fields fail closed.
+
+`{"kind":"tokens","tokens":["Task",".","sleep"]}` retains v1 token semantics.
+`identifier` requires `target` (`token` or `function`) and a `pattern` with
+`kind` (`prefix` or `suffix`) and `text` (one Swift identifier). These compare
+literal identifier spelling, normalizing backticks; they have no wildcard or
+regular expression syntax. `token` includes identifier declarations and uses;
+`function` checks only function declaration names. Comments, string text and
+regex contents do not count. Multiline declarations are handled by SwiftSyntax.
+
+To migrate a v1 rule, move its `tokens` array into a `match` object of kind
+`tokens`, keep `id` and `paths`, and change the configuration version to `2`.
+Then replace repeated `paths` arrays with a named `scope` where useful.
+The allowlist and output schema do not change.
+
 ## Swift classification and limits
 
 SwiftParser determines code, comments, normal/escaped/raw/multiline strings, and
