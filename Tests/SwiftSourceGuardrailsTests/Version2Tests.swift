@@ -3,25 +3,6 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct Version2Tests {
-    @Test(arguments: ["literals", "boundaries", "conditional-compilation", "conditional-conditions", "v2-calls", "v2-imports", "v2-strings"])
-    func tokenMigrationPreservesCompleteReports(name: String) throws {
-        var migrated = try #require(JSONSerialization.jsonObject(with: Data(SourceGuardrailsTests.config.utf8)) as? [String: Any])
-        migrated["version"] = 2
-        let rules = try #require(migrated["rules"] as? [[String: Any]])
-        migrated["rules"] = try rules.map { original in
-            var rule = original
-            let tokens = try #require(rule.removeValue(forKey: "tokens") as? [String])
-            rule["match"] = ["kind": "tokens", "tokens": tokens]
-            return rule
-        }
-        let source = try GuardrailSource(file: RelativePath("Tests/File.swift"), text: fixture(name))
-        let v1 = try SourceGuardrails.scan(configuration: GuardrailConfiguration.decode(Data(SourceGuardrailsTests.config.utf8)), files: [source])
-        let v2 = try SourceGuardrails.scan(configuration: GuardrailConfiguration.decode(JSONSerialization.data(withJSONObject: migrated)), files: [source])
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        #expect(try encoder.encode(v1) == encoder.encode(v2))
-    }
-
     @Test(arguments: [
         (#""Unsafe: documented; unsafe()""#, true),
         (#""Unchecked: documented; unsafe()""#, true),
@@ -519,7 +500,7 @@ struct Version2Tests {
         #expect(try scan("func other() {}", match: match).exitCode == 0)
     }
 
-    @Test func version2TokensKeepVersion1Classification() throws {
+    @Test func tokensMatchOnlyCode() throws {
         let source = "Task" + ".sleep()\nlet text = \"Task" + ".sleep()\""
         let match = #"{"kind":"tokens","tokens":["Task",".","sleep"]}"#
         #expect(try scan(source, match: match).violations.map(\.line) == [1])

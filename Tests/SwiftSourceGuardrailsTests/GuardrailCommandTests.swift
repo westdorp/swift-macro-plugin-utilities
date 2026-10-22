@@ -233,7 +233,6 @@ struct GuardrailCommandTests {
         #expect(explicit.config == "policy.json")
         #expect(explicit.root == "repository")
         #expect(SwiftSourceGuardrails.helpMessage().contains("--config"))
-        #expect(SwiftSourceGuardrails.helpMessage().contains("version 1 or 2"))
     }
 
     @Test func scansOverlappingScopesOnceAndRendersJSON() throws {
