@@ -23,17 +23,10 @@ enum SourceGuardrails {
                 }.joined(separator: "\n")
                 throw GuardrailInputError("Cannot scan malformed Swift: \(details)")
             }
-            let visitor = CodeTokenVisitor(viewMode: .sourceAccurate)
-            visitor.walk(tree)
-            for run in visitor.runs {
-                for rule in rules where run.count >= rule.tokens.count {
-                    let pattern = rule.tokens.map(\.text)
-                    for start in 0...(run.count - pattern.count) {
-                        let window = run[start..<(start + pattern.count)]
-                        guard window.map(\.guardrailText) == pattern else { continue }
-                        let location = locations.location(for: run[start].positionAfterSkippingLeadingTrivia)
-                        matches.append(.init(file: file.file.value, line: location.line, column: location.column, rule: rule.id))
-                    }
+            for rule in rules {
+                for token in CodeTokens.starts(in: tree, matching: rule.tokens) {
+                    let location = locations.location(for: token.positionAfterSkippingLeadingTrivia)
+                    matches.append(.init(file: file.file.value, line: location.line, column: location.column, rule: rule.id))
                 }
             }
         }
@@ -52,45 +45,3 @@ enum SourceGuardrails {
     }
 }
 
-private final class CodeTokenVisitor: SyntaxVisitor {
-    private(set) var runs: [[TokenSyntax]] = [[]]
-
-    override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
-        for clause in node.clauses {
-            if let condition = clause.condition {
-                let surroundingRun = runs.removeLast()
-                runs.append([])
-                walk(condition)
-                runs.append(surroundingRun)
-            }
-            if let elements = clause.elements { walk(elements) }
-        }
-        return .skipChildren
-    }
-
-    override func visit(_ token: TokenSyntax) -> SyntaxVisitorContinueKind {
-        if token.tokenKind != .endOfFile { runs[runs.count - 1].append(token) }
-        return .skipChildren
-    }
-
-    override func visit(_ node: RegexLiteralExprSyntax) -> SyntaxVisitorContinueKind {
-        runs.append([])
-        return .skipChildren
-    }
-
-    override func visit(_ node: SimpleStringLiteralExprSyntax) -> SyntaxVisitorContinueKind {
-        runs.append([])
-        return .skipChildren
-    }
-
-    override func visit(_ node: StringLiteralExprSyntax) -> SyntaxVisitorContinueKind {
-        runs.append([])
-        for segment in node.segments {
-            if let interpolation = segment.as(ExpressionSegmentSyntax.self) {
-                walk(interpolation.expressions)
-                runs.append([])
-            }
-        }
-        return .skipChildren
-    }
-}
