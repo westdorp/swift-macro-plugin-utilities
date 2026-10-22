@@ -57,6 +57,12 @@ private final class CodeTokenVisitor: SyntaxVisitor {
 
     override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
         for clause in node.clauses {
+            if let condition = clause.condition {
+                let surroundingRun = runs.removeLast()
+                runs.append([])
+                walk(condition)
+                runs.append(surroundingRun)
+            }
             if let elements = clause.elements { walk(elements) }
         }
         return .skipChildren

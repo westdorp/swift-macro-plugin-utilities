@@ -1,0 +1,23 @@
+Task
+#if canImport(X)
+.sleep()
+#elseif DEBUG
+.sleep()
+#else
+.yield()
+#endif
+#if DEBUG
+let flag = true
+#elseif canImport(Y)
+let flag = false
+#endif
+#if OUTER
+#if INNER
+let nested = true
+#endif
+#endif
+
+Task
+#if A
+.sleep()
+#endif

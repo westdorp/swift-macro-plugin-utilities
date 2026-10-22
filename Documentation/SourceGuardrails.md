@@ -79,10 +79,14 @@ Matching is syntactic. It does not resolve names, imports, aliases, overloads or
 types, and does not expand macros. A qualified spelling `Swift.Task.sleep` still
 contains the sequence `Task`, `.`, `sleep`; an alias spelling does not. All
 conditional compilation branches are checked. The `#if`, `#elseif`, `#else` and
-`#endif` directive tokens and their conditions are omitted from match runs;
-clause bodies are visited in source order without interrupting a run. Thus
+`#endif` directive keyword tokens are omitted from match runs. Each `#if` and
+`#elseif` condition is checked as a separate code run: `["canImport", "(", "X", ")"]`
+matches `#if canImport(X)`, and `["DEBUG"]` matches `#if DEBUG`. A condition cannot
+join tokens before or after it, including tokens in another condition. Clause
+bodies are visited in source order without interrupting the surrounding code run. Thus
 `Task` followed by `#if A`, `.sleep()` and `#endif` is reported. Matching can
 also span mutually exclusive clause bodies; it does not evaluate conditions.
+The sequence `["A", ".", "sleep"]` does not join `#if A` to a following `.sleep()`.
 The installed/resolved
 swift-syntax version defines accepted Swift grammar, which may differ from a
 newer compiler. SwiftParser parse errors fail closed rather than accepting a

@@ -31,9 +31,36 @@ struct SourceGuardrailsTests {
         #expect(report.exitCode == 1)
         #expect(report.violations.map(\.line) == [1, 5, 13, 19, 24, 26, 28])
         let conditions = Self.config.replacingOccurrences(of: "\"Task\",\".\",\"sleep\"", with: "\"A\"")
-        #expect(try scan(source, config: conditions).violations.isEmpty)
+        #expect(try scan(source, config: conditions).violations.map(\.line) == [2, 6, 14, 20, 23])
         let alternate = conditions.replacingOccurrences(of: "\"A\"", with: "\"B\"")
-        #expect(try scan(source, config: alternate).violations.isEmpty)
+        #expect(try scan(source, config: alternate).violations.map(\.line) == [7, 25])
+    }
+
+    @Test(arguments: [
+        (["canImport", "(", "X", ")"], [2]),
+        (["DEBUG"], [4, 9]),
+        (["canImport", "(", "Y", ")"], [11]),
+        (["OUTER"], [14]),
+        (["INNER"], [15]),
+        (["A"], [21]),
+        (["A", ".", "sleep"], []),
+        (["Task", "canImport"], []),
+        (["OUTER", "INNER"], []),
+        (["#if"], []),
+        (["#elseif"], []),
+        (["#else"], []),
+        (["#endif"], [])
+    ])
+    func conditionalConditionsAreSeparateCodeRuns(tokens: [String], lines: [Int]) throws {
+        let encoded = String(decoding: try JSONEncoder().encode(tokens), as: UTF8.self)
+        let config = Self.config.replacingOccurrences(of: "[\"Task\",\".\",\"sleep\"]", with: encoded)
+        let report = try scan(fixture("conditional-conditions"), config: config)
+        #expect(report.violations.map(\.line) == lines)
+    }
+
+    @Test func conditionRunsPreserveSurroundingCodeMatches() throws {
+        let report = try scan(fixture("conditional-conditions"))
+        #expect(report.violations.map(\.line) == [1, 20])
     }
 
     @Test(arguments: ["\"foo\"", "#\"foo\"#", "\"\"\"\nfoo\n\"\"\"", "/foo/", "#/foo/#", "#/\nfoo\n/#", "\"", "\"\"\""])
