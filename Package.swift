@@ -6,21 +6,24 @@ let package = Package(
     name: "swift-macro-plugin-utilities",
     platforms: [.macOS(.v10_15)],
     products: [
+        .executable(name: "swift-source-guardrails", targets: ["SwiftSourceGuardrails"]),
         .library(
             name: "MacroPluginUtilities",
             targets: ["MacroPluginUtilities"]
         ),
     ],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
         .package(
             url: "https://github.com/swiftlang/swift-syntax.git",
             "602.0.0"..<"604.0.0"
         ),
     ],
     targets: [
-        .target(
+        .executableTarget(
             name: "SwiftSourceGuardrails",
             dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
                 .product(name: "SwiftParserDiagnostics", package: "swift-syntax"),
                 .product(name: "SwiftSyntax", package: "swift-syntax"),

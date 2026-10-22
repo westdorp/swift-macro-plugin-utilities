@@ -12,7 +12,7 @@ struct SourceGuardrailsTests {
 
     @Test func literalAndCommentClassification() throws {
         let report = try scan(fixture("literals"))
-        #expect(report.violations.map(\.line) == [25, 26, 27, 28, 29, 30, 32])
+        #expect(report.violations.map(\.line) == [25, 26, 27, 28, 29, 30, 32, 35])
         #expect(report.violations.allSatisfy { $0.rule == "no-delay" })
     }
 
@@ -23,6 +23,18 @@ struct SourceGuardrailsTests {
         let sources = try scan(source, file: "Sources/File.swift")
         #expect(sources.violations.map(\.rule) == ["no-delay", "no-delay"])
         #expect(try scan(source, file: "TestsOther/File.swift").violations.isEmpty)
+    }
+
+    @Test func directiveStringContentsAreNotCodeTokens() throws {
+        let config = Self.config.replacingOccurrences(of: "\"Task\",\".\",\"sleep\"", with: "\"Task\"")
+        let report = try scan("""
+        #sourceLocation(file: "Task", line: 1)
+        let ordinary = "Task"
+        let raw = #"Task"#
+        let regex = /Task/
+        @_silgen_name("Task") func example()
+        """, config: config)
+        #expect(report.violations.isEmpty)
     }
 
     @Test func locationsArePhysicalAndUTF8Based() throws {

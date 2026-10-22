@@ -65,6 +65,11 @@ private final class CodeTokenVisitor: SyntaxVisitor {
         return .skipChildren
     }
 
+    override func visit(_ node: SimpleStringLiteralExprSyntax) -> SyntaxVisitorContinueKind {
+        runs.append([])
+        return .skipChildren
+    }
+
     override func visit(_ node: StringLiteralExprSyntax) -> SyntaxVisitorContinueKind {
         runs.append([])
         for segment in node.segments {

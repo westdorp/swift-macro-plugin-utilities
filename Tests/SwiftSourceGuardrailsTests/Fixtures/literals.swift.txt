@@ -31,3 +31,7 @@ let multipleInterpolations = "\(Task.sleep()) \(0)"
 let multilineInterpolation = """
 \(Task.sleep())
 """
+let rawMultilineInterpolation = ##"""
+\##(Task.sleep())
+"""##
+let escapedInterpolation = "\\(Task.sleep())"

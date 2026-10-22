@@ -4,6 +4,10 @@
 deterministic fix-its for Swift macro-plugin implementations. It is not a macro
 framework, semantic type checker, or runtime library.
 
+The package also ships [`swift-source-guardrails`](Documentation/SourceGuardrails.md),
+a SwiftParser-based executable for repository-owned token bans and counted
+allowlists. It emits JSON plus human diagnostics and leaves library APIs unchanged.
+
 ## Diagnostic contract
 
 Macro diagnostics must say what is wrong, why it matters, and how to fix it.
