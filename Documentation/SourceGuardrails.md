@@ -107,6 +107,42 @@ To migrate a v1 rule, move its `tokens` array into a `match` object of kind
 Then replace repeated `paths` arrays with a named `scope` where useful.
 The allowlist and output schema do not change.
 
+For example, the following complete configuration checks generated strings and
+Network imports in every Swift file under `Sources`, including newly added
+subdirectories. The scope set is defined once for both rules.
+
+```json
+{
+  "version": 2,
+  "scopes": {"production": ["Sources"]},
+  "rules": [
+    {
+      "id": "generated-delay",
+      "scope": "production",
+      "match": {"kind": "stringLiteral", "tokens": ["Task", ".", "sleep"]}
+    },
+    {
+      "id": "network-import",
+      "scope": "production",
+      "match": {
+        "kind": "import",
+        "module": {"kind": "exact", "name": "Network"},
+        "form": "declaration",
+        "importKind": "any",
+        "presence": "forbidden"
+      }
+    }
+  ],
+  "allowlist": []
+}
+```
+
+`let generated = "try await Task.sleep(for: .seconds(1))"` fails the first
+rule; `// try await Task.sleep(for: .seconds(1))` passes it.
+`import Network` and `@preconcurrency import Network` fail the second rule;
+`import NetworkExtension` passes it. Each matching string literal or import
+declaration contributes one to its rule's allowlist count.
+
 ### Calls, members, contexts and argument values
 
 `{"kind":"call","name":["Task","sleep"]}` matches a
@@ -228,8 +264,8 @@ rules. Missing-presence rules never parse generated code.
 ## Swift classification and limits
 
 SwiftParser determines code, comments, normal/escaped/raw/multiline strings, and
-bare/extended/multiline regex literals. Literal contents and comments do not
-match. Executable expressions inside string interpolation do match, including
+bare/extended/multiline regex literals. Token rules ignore literal contents and
+comments. Executable expressions inside string interpolation do match, including
 raw-string interpolation, nested strings and closures. Token matching cannot
 cross a literal or interpolation boundary. A regex inside an interpolation is
 still a regex literal and does not match.
@@ -280,7 +316,7 @@ report with `scannedFiles: 0`, no partial violations and an `errors` entry.
 
 Stderr contains per-violation locations, count mismatches and a human summary.
 Exit `0` means the scan completed and all policies/counts passed; `1` means a
-ban or allowlist count failed; `2` means an input error. ArgumentParser owns help
+policy or allowlist count failed; `2` means an input error. ArgumentParser owns help
 and usage errors: `--help` prints help with exit `0`, and invalid/missing
 arguments print a usage diagnostic with exit `64`, without a JSON report.
 Output write failures throw to ArgumentParser, which reports an error with exit

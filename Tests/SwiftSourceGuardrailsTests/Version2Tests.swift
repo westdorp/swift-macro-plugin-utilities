@@ -3,6 +3,53 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct Version2Tests {
+    @Test(arguments: ["literals", "boundaries", "conditional-compilation", "conditional-conditions", "v2-calls", "v2-imports", "v2-strings"])
+    func tokenMigrationPreservesCompleteReports(name: String) throws {
+        var migrated = try #require(JSONSerialization.jsonObject(with: Data(SourceGuardrailsTests.config.utf8)) as? [String: Any])
+        migrated["version"] = 2
+        let rules = try #require(migrated["rules"] as? [[String: Any]])
+        migrated["rules"] = try rules.map { original in
+            var rule = original
+            let tokens = try #require(rule.removeValue(forKey: "tokens") as? [String])
+            rule["match"] = ["kind": "tokens", "tokens": tokens]
+            return rule
+        }
+        let source = try GuardrailSource(file: RelativePath("Tests/File.swift"), text: fixture(name))
+        let v1 = try SourceGuardrails.scan(configuration: GuardrailConfiguration.decode(Data(SourceGuardrailsTests.config.utf8)), files: [source])
+        let v2 = try SourceGuardrails.scan(configuration: GuardrailConfiguration.decode(JSONSerialization.data(withJSONObject: migrated)), files: [source])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        #expect(try encoder.encode(v1) == encoder.encode(v2))
+    }
+
+    @Test(arguments: [1, 2])
+    func stringAllowancesCountLiteralsInsteadOfTokenStarts(expected: Int) throws {
+        let source = "let text = \"Task" + ".sleep(); Task" + ".sleep()\""
+        let allowance = #"[{"rule":"rule","file":"Sources/File.swift","reason":"Generated fixture","expectedCount":\#(expected)}]"#
+        let report = try scan(source, match: #"{"kind":"stringLiteral","tokens":["Task",".","sleep"]}"#, allowlist: allowance)
+        #expect(report.allowlistChecks.map(\.actualCount) == [1])
+        #expect(report.violations.count == (expected == 1 ? 0 : 1))
+        #expect(report.exitCode == (expected == 1 ? 0 : 1))
+    }
+
+    @Test(arguments: ["let ordinary = 0", "@MainActor struct Example {}"])
+    func requiredPresenceAllowanceFailsWhenItBecomesStale(source: String) throws {
+        let allowance = #"[{"rule":"rule","file":"Sources/File.swift","reason":"Missing annotation fixture","expectedCount":1}]"#
+        let report = try scan(source, match: #"{"kind":"requireAttribute","name":["MainActor"]}"#, allowlist: allowance)
+        let missing = source == "let ordinary = 0"
+        #expect(report.allowlistChecks.map(\.actualCount) == [missing ? 1 : 0])
+        #expect(report.violations.isEmpty)
+        #expect(report.exitCode == (missing ? 0 : 1))
+    }
+
+    @Test func fileConditionAndLexicalContextCompose() throws {
+        let fields = #","when":{"imports":"Foundation"},"context":{"relation":"outside","kind":"type","name":"Adapter"}"#
+        let source = "import Foundation\nstruct Adapter { func run() { pause() } }\nstruct Other { func run() { pause() } }"
+        let match = #"{"kind":"call","name":["pause"]}"#
+        #expect(try scan(source, match: match, fields: fields).violations.map(\.line) == [3])
+        #expect(try scan(source.replacingOccurrences(of: "import Foundation", with: "import OtherModule"), match: match, fields: fields).violations.isEmpty)
+    }
+
     @Test func generatedStringCodeUsesDecodedSegmentsAndSwiftParser() throws {
         let match = #"{"kind":"stringLiteral","tokens":["Task",".","sleep"]}"#
         let report = try scan(fixture("v2-strings"), match: match)

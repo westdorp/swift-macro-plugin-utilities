@@ -3,6 +3,67 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct GuardrailCommandTests {
+    @Test func version2AcceptanceExamplesReachTheCommandOutput() throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        try fixture.write("guardrails.json", #"""
+        {"version":2,"scopes":{"production":["Sources"]},"rules":[
+          {"id":"generated-delay","scope":"production","match":{"kind":"stringLiteral","tokens":["Task",".","sleep"]}},
+          {"id":"network-import","scope":"production","match":{"kind":"import","module":{"kind":"exact","name":"Network"},"form":"declaration","importKind":"any","presence":"forbidden"}}
+        ],"allowlist":[]}
+        """#)
+        let generated = "try await Task" + ".sleep(for: .seconds(1))"
+        try fixture.write("Sources/Generated.swift", "let generated = \"\(generated)\"\n// \(generated)")
+        try fixture.write("Sources/New/Imports.swift", "import Network\n@preconcurrency\nimport Network\nimport NetworkExtension")
+        let command = try SwiftSourceGuardrails.parse(["--config", fixture.config.path, "--root", fixture.root.path])
+        var output = Data()
+        var summary = Data()
+        do {
+            try command.run(writeOutput: { output.append($0) }, writeError: { summary.append($0) })
+            Issue.record("Policy violations must fail the command")
+        } catch {
+            #expect(SwiftSourceGuardrails.exitCode(for: error).rawValue == 1)
+        }
+        let report = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+        #expect(report["scannedFiles"] as? Int == 2)
+        let violations = try #require(report["violations"] as? [[String: Any]])
+        #expect(violations.compactMap { $0["file"] as? String } == ["Sources/Generated.swift", "Sources/New/Imports.swift", "Sources/New/Imports.swift"])
+        #expect(violations.compactMap { $0["line"] as? Int } == [1, 1, 2])
+        #expect(violations.compactMap { $0["rule"] as? String } == ["generated-delay", "network-import", "network-import"])
+        #expect(String(decoding: summary, as: UTF8.self).contains("3 violation(s)"))
+    }
+
+    @Test(arguments: [
+        #"{"kind":"stringLiteral","text":""}"#,
+        #"{"kind":"stringLiteral","regex":"Task.*"}"#,
+        #"{"kind":"call","name":[]}"#,
+        #"{"kind":"import","module":{"kind":"any"},"form":"canImport","importKind":"struct","presence":"forbidden"}"#
+    ])
+    func version2InvalidMatchersExitTwo(match: String) throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        try fixture.write("guardrails.json", #"{"version":2,"rules":[{"id":"bad","paths":["Sources"],"match":\#(match)}],"allowlist":[]}"#)
+        let report = GuardrailCommand.scan(config: fixture.config, root: fixture.root)
+        #expect(report.exitCode == 2)
+        #expect(report.errors.isEmpty == false)
+        #expect(report.scannedFiles == 0)
+        #expect(report.violations.isEmpty)
+    }
+
+    @Test func version2MalformedSourceDiscardsEarlierFindingsEvenWhenConditionIsFalse() throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        try fixture.write("guardrails.json", #"{"version":2,"rules":[{"id":"calls","paths":["Sources"],"match":{"kind":"call","name":["pause"]},"when":{"imports":"Foundation"}}],"allowlist":[]}"#)
+        try fixture.write("Sources/A.swift", "import Foundation\npause()")
+        try fixture.write("Sources/Z.swift", "func broken( {")
+        let report = GuardrailCommand.scan(config: fixture.config, root: fixture.root)
+        #expect(report.exitCode == 2)
+        #expect(report.errors.joined().contains("Sources/Z.swift"))
+        #expect(report.scannedFiles == 0)
+        #expect(report.violations.isEmpty)
+        #expect(report.allowlistChecks.isEmpty)
+    }
+
     @Test func namedScopeIncludesNewDescendantsWithoutRuleEdits() throws {
         let fixture = try CommandFixture()
         defer { fixture.remove() }
@@ -80,6 +141,7 @@ struct GuardrailCommandTests {
         #expect(explicit.config == "policy.json")
         #expect(explicit.root == "repository")
         #expect(SwiftSourceGuardrails.helpMessage().contains("--config"))
+        #expect(SwiftSourceGuardrails.helpMessage().contains("version 1 or 2"))
     }
 
     @Test func scansOverlappingScopesOnceAndRendersJSON() throws {
