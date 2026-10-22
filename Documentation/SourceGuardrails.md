@@ -102,6 +102,13 @@ backticks; they have no wildcard or regular expression syntax. `token` includes 
 `function` checks only function declaration names. Comments, string text and
 regex contents do not count. Multiline declarations are handled by SwiftSyntax.
 
+A prefix pattern may add `"nextIsUppercase": true`, for example
+`{"kind":"prefix","text":"test","nextIsUppercase":true}`. It then requires an
+actual following Unicode uppercase letter: `testFoo` matches, while `test`,
+`testing`, `test1` and `test_Value` do not. Omitting the option or setting it to
+`false` preserves ordinary prefix matching. The option is invalid for suffix
+patterns, including when set to `false`.
+
 To migrate a v1 rule, move its `tokens` array into a `match` object of kind
 `tokens`, keep `id` and `paths`, and change the configuration version to `2`.
 Then replace repeated `paths` arrays with a named `scope` where useful.

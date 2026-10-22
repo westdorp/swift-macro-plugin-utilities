@@ -404,6 +404,35 @@ struct Version2Tests {
         }
     }
 
+    @Test(arguments: [
+        ("testFoo", true), ("testing", false), ("test", false), ("test1", false),
+        ("test_Value", false), ("testÉxample", true), ("testΩ", true),
+        ("test中文", false), ("`testFoo`", true), ("TestFoo", false)
+    ], ["token", "function"])
+    func identifierPrefixesCanRequireAnUppercaseLetter(example: (String, Bool), target: String) throws {
+        let (name, matches) = example
+        let match = #"{"kind":"identifier","target":"\#(target)","pattern":{"kind":"prefix","text":"test","nextIsUppercase":true}}"#
+        let source = "func\n\(name)\n() {}"
+        let report = try scan(source, match: match)
+        #expect(report.violations.map(\.line) == (matches ? [2] : []))
+    }
+
+    @Test(arguments: ["", #", "nextIsUppercase":false"#])
+    func absentOrFalseUppercaseConstraintPreservesPrefixes(option: String) throws {
+        let match = #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test"\#(option)}}"#
+        #expect(try scan("let test = 1\nlet testing = 2\nlet testFoo = 3", match: match).violations.map(\.line) == [1, 2, 3])
+    }
+
+    @Test func uppercasePrefixRulesIgnoreLiteralTextAndComments() throws {
+        let match = #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test","nextIsUppercase":true}}"#
+        let source = #"""
+        // testFoo
+        let quoted = "testFoo"
+        let regex = /testFoo/
+        """#
+        #expect(try scan(source, match: match).violations.isEmpty)
+    }
+
     @Test(arguments: [("prefix", "check", [1, 3]), ("suffix", "Clock", [4, 5])])
     func identifierTokens(kind: String, text: String, lines: [Int]) throws {
         let source = """

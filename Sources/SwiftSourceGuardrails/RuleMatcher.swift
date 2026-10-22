@@ -276,27 +276,39 @@ struct LexicalContext: Decodable {
 
 enum IdentifierTarget: String, Decodable { case token, function }
 
-struct IdentifierPattern: Decodable {
-    enum Kind: String, Decodable { case prefix, suffix }
-    let kind: Kind
-    let text: String
+enum IdentifierPattern: Decodable {
+    case prefix(String)
+    case prefixBeforeUppercase(String)
+    case suffix(String)
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case kind, text }
+    private enum Kind: String, Decodable { case prefix, suffix }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case kind, text, nextIsUppercase }
 
     init(from decoder: any Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        kind = try values.decode(Kind.self, forKey: .kind)
+        let kind = try values.decode(Kind.self, forKey: .kind)
         let token = try values.decode(CodeToken.self, forKey: .text)
         guard case .identifier = token.kind else { throw GuardrailInputError("Identifier pattern text must be an identifier") }
-        text = token.text
+        switch kind {
+        case .prefix:
+            let nextIsUppercase = values.contains(.nextIsUppercase) ? try values.decode(Bool.self, forKey: .nextIsUppercase) : false
+            self = nextIsUppercase ? .prefixBeforeUppercase(token.text) : .prefix(token.text)
+        case .suffix:
+            guard !values.contains(.nextIsUppercase) else { throw GuardrailInputError("nextIsUppercase requires a prefix pattern") }
+            self = .suffix(token.text)
+        }
     }
 
     func matches(_ token: TokenSyntax) -> Bool {
         guard case .identifier = token.tokenKind else { return false }
-        switch kind {
-        case .prefix: return token.guardrailText.hasPrefix(text)
-        case .suffix: return token.guardrailText.hasSuffix(text)
+        let name = token.guardrailText
+        switch self {
+        case .prefix(let text): return name.hasPrefix(text)
+        case .prefixBeforeUppercase(let text):
+            guard name.hasPrefix(text), let next = name.dropFirst(text.count).first else { return false }
+            return next.isLetter && next.isUppercase
+        case .suffix(let text): return name.hasSuffix(text)
         }
     }
 }
