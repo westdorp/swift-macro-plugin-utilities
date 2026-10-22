@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "swift-macro-plugin-utilities",
-    platforms: [.macOS(.v10_15)],
+    platforms: [.macOS(.v13)],
     products: [
         .executable(name: "swift-source-guardrails", targets: ["SwiftSourceGuardrails"]),
         .library(

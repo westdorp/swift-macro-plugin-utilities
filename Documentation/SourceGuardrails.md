@@ -124,6 +124,9 @@ Exit `0` means the scan completed and all policies/counts passed; `1` means a
 ban or allowlist count failed; `2` means an input error. ArgumentParser owns help
 and usage errors: `--help` prints help with exit `0`, and invalid/missing
 arguments print a usage diagnostic with exit `64`, without a JSON report.
+Output write failures throw to ArgumentParser, which reports an error with exit
+`1`. A failed write can leave stdout or stderr incomplete; a scan's normal exit
+status applies only after both writes succeed.
 
 Downstream adoption is separate: this product does not replace this package's
 existing test guardrail script or any consuming repository's gate.

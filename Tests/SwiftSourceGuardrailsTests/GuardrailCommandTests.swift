@@ -3,6 +3,56 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct GuardrailCommandTests {
+    @Test(arguments: [0, 1, 2])
+    func entryPointPreservesReportAndExitStatus(scanExitCode: Int32) throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        let command = try fixture.command(scanExitCode: scanExitCode)
+        var output = Data()
+        var summary = Data()
+        do {
+            try command.run(writeOutput: { output.append($0) }, writeError: { summary.append($0) })
+            #expect(scanExitCode == 0)
+        } catch {
+            #expect(scanExitCode != 0)
+            #expect(SwiftSourceGuardrails.exitCode(for: error).rawValue == scanExitCode)
+        }
+        let report = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+        #expect(report["schemaVersion"] as? Int == 1)
+        #expect(output.last == 0x0a)
+        #expect(String(decoding: summary, as: UTF8.self).contains("Swift source guardrails"))
+        #expect(summary.last == 0x0a)
+    }
+
+    @Test(arguments: [FailingStream.standardOutput, .standardError], [0, 1, 2])
+    func outputFailuresReachArgumentParser(stream: FailingStream, scanExitCode: Int32) throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        let command = try fixture.command(scanExitCode: scanExitCode)
+        let failure = CocoaError(.fileWriteNoPermission)
+        var attemptedStreams: [FailingStream] = []
+        do {
+            try command.run(writeOutput: { _ in
+                attemptedStreams.append(.standardOutput)
+                if stream == .standardOutput { throw failure }
+            }, writeError: { _ in
+                attemptedStreams.append(.standardError)
+                if stream == .standardError { throw failure }
+            })
+            Issue.record("Output failure was swallowed")
+        } catch {
+            #expect(error as? CocoaError == failure)
+            #expect(SwiftSourceGuardrails.exitCode(for: error).rawValue == 1)
+            #expect(SwiftSourceGuardrails.fullMessage(for: error).contains(failure.localizedDescription))
+        }
+        #expect(attemptedStreams == (stream == .standardOutput ? [.standardOutput] : [.standardOutput, .standardError]))
+    }
+
+    enum FailingStream: Sendable {
+        case standardOutput
+        case standardError
+    }
+
     @Test func documentedArgumentsUseArgumentParser() throws {
         let defaults = try SwiftSourceGuardrails.parse(["--config", "guardrails.json"])
         #expect(defaults.root == ".")
@@ -166,6 +216,13 @@ private struct CommandFixture {
         let url = root.appendingPathComponent(relative)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(text.utf8).write(to: url)
+    }
+
+    func command(scanExitCode: Int32) throws -> SwiftSourceGuardrails {
+        try write("Sources/File.swift", scanExitCode == 1 ? "Task" + ".sleep()" : "let value = 1")
+        try write("Tests/File.swift", "let value = 2")
+        let configURL = scanExitCode == 2 ? root.appendingPathComponent("absent.json") : config
+        return try SwiftSourceGuardrails.parse(["--config", configURL.path, "--root", root.path])
     }
 
     func remove() {

@@ -98,8 +98,9 @@ make build
 
 ## Platform floor
 
-The manifest declares macOS 10.15, matching SwiftSyntax 602's dependency
-floor. This is a compiler-host build constraint: macro plugins do not execute
+The package requires macOS 13 or later on the compiler host, matching its
+macOS 13-or-later consumers and supporting throwing output writes in
+`swift-source-guardrails`. Macro plugins do not execute
 in downstream app processes, and the declaration does not set an app deployment
 target. The package gate verifies this host configuration on macOS 26.
 
