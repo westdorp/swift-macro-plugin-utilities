@@ -18,8 +18,15 @@ struct SwiftSourceGuardrails: ParsableCommand {
         let report = GuardrailCommand.scan(config: URL(fileURLWithPath: config), root: URL(fileURLWithPath: root))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try FileHandle.standardOutput.write(encoder.encode(report) + Data("\n".utf8))
-        FileHandle.standardError.write(Data((report.humanSummary + "\n").utf8))
+        let output = try encoder.encode(report) + Data("\n".utf8)
+        let summary = Data((report.humanSummary + "\n").utf8)
+        if #available(macOS 10.15.4, *) {
+            try FileHandle.standardOutput.write(contentsOf: output)
+            try FileHandle.standardError.write(contentsOf: summary)
+        } else {
+            FileHandle.standardOutput.write(output)
+            FileHandle.standardError.write(summary)
+        }
         if report.exitCode != 0 { throw ExitCode(report.exitCode) }
     }
 }
