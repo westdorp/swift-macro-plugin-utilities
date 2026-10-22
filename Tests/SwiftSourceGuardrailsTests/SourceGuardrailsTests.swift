@@ -25,6 +25,29 @@ struct SourceGuardrailsTests {
         #expect(try scan(source, file: "TestsOther/File.swift").violations.isEmpty)
     }
 
+    @Test func conditionalDirectivesDoNotInterruptMatching() throws {
+        let source = try fixture("conditional-compilation")
+        let report = try scan(source)
+        #expect(report.exitCode == 1)
+        #expect(report.violations.map(\.line) == [1, 5, 13, 19, 24, 26, 28])
+        let conditions = Self.config.replacingOccurrences(of: "\"Task\",\".\",\"sleep\"", with: "\"A\"")
+        #expect(try scan(source, config: conditions).violations.isEmpty)
+        let alternate = conditions.replacingOccurrences(of: "\"A\"", with: "\"B\"")
+        #expect(try scan(source, config: alternate).violations.isEmpty)
+    }
+
+    @Test(arguments: ["\"foo\"", "#\"foo\"#", "\"\"\"\nfoo\n\"\"\"", "/foo/", "#/foo/#", "#/\nfoo\n/#", "\"", "\"\"\""])
+    func literalPatternsFailClosed(pattern: String) throws {
+        let encoded = String(decoding: try JSONEncoder().encode([pattern]), as: UTF8.self)
+        let config = Self.config.replacingOccurrences(of: "[\"Task\",\".\",\"sleep\"]", with: encoded)
+        do {
+            _ = try GuardrailConfiguration.decode(Data(config.utf8))
+            Issue.record("Literal pattern was accepted: \(pattern)")
+        } catch let error as GuardrailInputError {
+            #expect(error.description.contains("pattern token kinds must be code tokens"))
+        }
+    }
+
     @Test func directiveStringContentsAreNotCodeTokens() throws {
         let config = Self.config.replacingOccurrences(of: "\"Task\",\".\",\"sleep\"", with: "\"Task\"")
         let report = try scan("""

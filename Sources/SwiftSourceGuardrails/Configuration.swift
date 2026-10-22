@@ -38,6 +38,14 @@ struct CodeToken: Decodable {
         let text = try decoder.singleValueContainer().decode(String.self)
         let tree = Parser.parse(source: text)
         let tokens = tree.tokens(viewMode: .sourceAccurate).filter { $0.tokenKind != .endOfFile }
+        for token in tokens {
+            switch token.tokenKind {
+            case .stringQuote, .multilineStringQuote, .singleQuote, .stringSegment, .rawStringPoundDelimiter,
+                .regexSlash, .regexPoundDelimiter, .regexLiteralPattern:
+                throw GuardrailInputError("pattern token kinds must be code tokens: \(text)")
+            default: break
+            }
+        }
         guard tokens.count == 1, let token = tokens.first,
             token.text == text, token.leadingTrivia.isEmpty, token.trailingTrivia.isEmpty,
             token.tokenDiagnostic == nil

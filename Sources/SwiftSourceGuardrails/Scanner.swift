@@ -55,6 +55,13 @@ enum SourceGuardrails {
 private final class CodeTokenVisitor: SyntaxVisitor {
     private(set) var runs: [[TokenSyntax]] = [[]]
 
+    override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
+        for clause in node.clauses {
+            if let elements = clause.elements { walk(elements) }
+        }
+        return .skipChildren
+    }
+
     override func visit(_ token: TokenSyntax) -> SyntaxVisitorContinueKind {
         if token.tokenKind != .endOfFile { runs[runs.count - 1].append(token) }
         return .skipChildren

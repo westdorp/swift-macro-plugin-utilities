@@ -48,8 +48,9 @@ are literal: no glob, regular expression or exclusion syntax is supported.
 ```
 
 `rules` must be nonempty. Every rule has a unique, nonblank `id`, a nonempty
-`tokens` array and nonempty `paths`. Each token string must be one Swift token
-without surrounding trivia. For example, `Task.sleep` is three tokens and must
+`tokens` array and nonempty `paths`. Each token string must be one Swift code token
+without surrounding trivia. String-literal and regex-literal token kinds are
+rejected, including their delimiters and contents. For example, `Task.sleep` is three tokens and must
 be written as `["Task", ".", "sleep"]`. Tokens match consecutively in code,
 ignoring whitespace and comments. Identifier backticks are normalized. Longer
 identifiers such as `OtherTask` or `sleeper` do not match those token strings.
@@ -77,7 +78,12 @@ still a regex literal and does not match.
 Matching is syntactic. It does not resolve names, imports, aliases, overloads or
 types, and does not expand macros. A qualified spelling `Swift.Task.sleep` still
 contains the sequence `Task`, `.`, `sleep`; an alias spelling does not. All
-conditional compilation branches are checked. The installed/resolved
+conditional compilation branches are checked. The `#if`, `#elseif`, `#else` and
+`#endif` directive tokens and their conditions are omitted from match runs;
+clause bodies are visited in source order without interrupting a run. Thus
+`Task` followed by `#if A`, `.sleep()` and `#endif` is reported. Matching can
+also span mutually exclusive clause bodies; it does not evaluate conditions.
+The installed/resolved
 swift-syntax version defines accepted Swift grammar, which may differ from a
 newer compiler. SwiftParser parse errors fail closed rather than accepting a
 partial parse; this is not a substitute for compiler type checking.
