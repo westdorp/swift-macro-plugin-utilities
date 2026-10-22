@@ -348,7 +348,7 @@ enum IdentifierPattern: Decodable {
         case .prefix(let text): return name.hasPrefix(text)
         case .prefixBeforeUppercase(let text):
             guard name.hasPrefix(text), let next = name.dropFirst(text.count).first else { return false }
-            return next.isLetter && next.isUppercase
+            return next.unicodeScalars.first?.properties.generalCategory == .uppercaseLetter
         case .suffix(let text): return name.hasSuffix(text)
         }
     }

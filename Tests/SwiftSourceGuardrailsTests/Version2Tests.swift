@@ -459,7 +459,8 @@ struct Version2Tests {
     @Test(arguments: [
         ("testFoo", true), ("testing", false), ("test", false), ("test1", false),
         ("test_Value", false), ("testÉxample", true), ("testΩ", true),
-        ("test中文", false), ("`testFoo`", true), ("TestFoo", false)
+        ("test中文", false), ("`testFoo`", true), ("TestFoo", false),
+        ("testⅧ", false), ("testᴬ", false), ("test🅰", false)
     ], ["token", "function"])
     func identifierPrefixesCanRequireAnUppercaseLetter(example: (String, Bool), target: String) throws {
         let (name, matches) = example
