@@ -1,0 +1,33 @@
+// Task.sleep(for: .seconds(1))
+/// Task.sleep(for: .seconds(1))
+/* outer /* Task.sleep() */ Task.sleep() */
+let plain = "Task.sleep(for: .seconds(1))"
+let escaped = "\"Task.sleep()\""
+let raw = #"Task.sleep() \(Task.sleep())"#
+let rawHashes = ###"Task.sleep() \#(Task.sleep())"###
+let multiline = """
+Task.sleep(for: .seconds(1))
+"""
+let rawMultiline = ##"""
+Task.sleep() \(Task.sleep())
+"""##
+let bareRegex = /Task.sleep\(\)/
+let rawRegex = #/Task.sleep() " // /* /#
+let hashesRegex = ###/Task.sleep() /# /## /###
+let multilineRegex = #/
+Task.sleep()
+/#
+let escapedRegex = /Task\.sleep\(\)\//
+let interpolationText = "not code: \("Task.sleep()")"
+let rawInterpolationText = #"not code: \#("Task.sleep()")"#
+let regexInStringInterpolation = "\(#/Task.sleep()/#)"
+let adjacent = "Task" + ".sleep()"
+try await Task.sleep(for: .seconds(1))
+let ordinaryInterpolation = "\(Task.sleep())"
+let rawInterpolation = #"\#(Task.sleep())"#
+let nestedInterpolation = "\("\(Task.sleep())")"
+let closureInterpolation = "\({ Task.sleep() }())"
+let multipleInterpolations = "\(Task.sleep()) \(0)"
+let multilineInterpolation = """
+\(Task.sleep())
+"""

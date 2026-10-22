@@ -19,6 +19,19 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "SwiftSourceGuardrails",
+            dependencies: [
+                .product(name: "SwiftParser", package: "swift-syntax"),
+                .product(name: "SwiftParserDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+            ]
+        ),
+        .testTarget(
+            name: "SwiftSourceGuardrailsTests",
+            dependencies: ["SwiftSourceGuardrails"],
+            resources: [.copy("Fixtures")]
+        ),
+        .target(
             name: "MacroPluginUtilities",
             dependencies: [
                 .product(name: "SwiftDiagnostics", package: "swift-syntax"),
