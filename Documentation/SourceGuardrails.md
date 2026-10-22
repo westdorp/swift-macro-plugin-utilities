@@ -259,14 +259,41 @@ ignoring embedded Swift comments, strings and regexes. Content can be an
 incomplete Swift fragment; it need not compile or form a complete syntax tree.
 No regular expression is applied to source or literal content.
 
-Each matching literal reports once at its original opening delimiter, regardless
-of multiple groups or token starts. Interpolation expressions remain ordinary
+Each matching literal reports once at the start of the `StringSegmentSyntax`
+containing the first match. A match spanning segments uses the first segment
+containing matched content. Multiline literals have a segment per line; an
+escaped or raw spelling uses its containing segment's start, without mapping
+individual decoded characters back to source bytes. Multiple groups or token
+starts still count as one finding per literal. Interpolation expressions remain ordinary
 code; nested literals within them are checked independently. For example,
 `"Task.\(name)sleep()"` cannot match `["Task",".","sleep"]`, while
 `"prefix \(name)Task.sleep()"` can. Compiler-directive
 `SimpleStringLiteralExprSyntax` nodes, such as the filename in `#sourceLocation`,
 are excluded. File conditions and lexical contexts work as for other occurrence
 rules. Missing-presence rules never parse generated code.
+
+A string rule may require a literal reason marker before the matched construct:
+
+```json
+{"kind":"stringLiteral", "tokens":["unsafe","("],
+ "reasonMarkers":["Unchecked:","Unsafe:"]}
+```
+
+`reasonMarkers` is optional. When present it must be a nonempty array of
+nonblank literal strings. Any one marker, fully before the match, satisfies the
+rule. Markers are searched in decoded literal text, including generated comments,
+across earlier lines and segments of the same literal. There is no proximity
+limit. A marker in an earlier interpolation-free group counts, but a marker
+cannot be assembled across an interpolation; expression contents and other
+literals supply no reason. A marker after the construct does not satisfy it.
+The first match without an earlier marker reports once at its segment start.
+The option works with both `text` and `tokens`; exact `text` still matches a
+complete interpolation-free group.
+
+Migration from 0.5.0: v2 string rules previously reported at the literal's opening
+delimiter. Existing `text` and `tokens` rules now use the matched segment anchor
+described above, which can change line/column diagnostics. Matching and allowance
+counts are unchanged. V1 matching and locations are unchanged.
 
 ## Swift classification and limits
 

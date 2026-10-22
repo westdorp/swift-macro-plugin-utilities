@@ -34,6 +34,12 @@ struct GuardrailCommandTests {
     }
 
     @Test(arguments: [
+        #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[]}"#,
+        #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[""]}"#,
+        #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[" "]}"#,
+        #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":null}"#,
+        #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":"Unsafe:"}"#,
+        #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[1]}"#,
         #"{"kind":"stringLiteral","text":""}"#,
         #"{"kind":"stringLiteral","regex":"Task.*"}"#,
         #"{"kind":"call","name":[]}"#,

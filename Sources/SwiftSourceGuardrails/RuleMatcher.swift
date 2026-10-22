@@ -1,3 +1,4 @@
+import Foundation
 import SwiftSyntax
 
 struct RuleMatcher {
@@ -84,11 +85,16 @@ enum OccurrenceMatcher: Decodable {
     }
 }
 
-enum StringContentPattern: Decodable {
-    case text(String)
-    case tokens([CodeToken])
+struct StringContentPattern: Decodable {
+    enum Content {
+        case text(String)
+        case tokens([CodeToken])
+    }
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case kind, text, tokens }
+    let content: Content
+    let reasonMarkers: [String]
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case kind, text, tokens, reasonMarkers }
 
     init(from decoder: any Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
@@ -97,12 +103,18 @@ enum StringContentPattern: Decodable {
         case (true, false):
             let text = try values.decode(String.self, forKey: .text)
             guard !text.isEmpty else { throw GuardrailInputError("String text pattern must be nonempty") }
-            self = .text(text)
+            content = .text(text)
         case (false, true):
             let tokens = try values.decode([CodeToken].self, forKey: .tokens)
             guard !tokens.isEmpty else { throw GuardrailInputError("String token pattern must be nonempty") }
-            self = .tokens(tokens)
+            content = .tokens(tokens)
         default: throw GuardrailInputError("String literal matcher needs exactly one of text or tokens")
+        }
+        reasonMarkers = values.contains(.reasonMarkers) ? try values.decode([String].self, forKey: .reasonMarkers) : []
+        if values.contains(.reasonMarkers) {
+            guard !reasonMarkers.isEmpty,
+                reasonMarkers.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            else { throw GuardrailInputError("reasonMarkers must contain nonblank literal text") }
         }
     }
 }

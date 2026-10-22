@@ -22,6 +22,67 @@ struct Version2Tests {
         #expect(try encoder.encode(v1) == encoder.encode(v2))
     }
 
+    @Test(arguments: [
+        (#""Unsafe: documented; unsafe()""#, true),
+        (#""Unchecked: documented; unsafe()""#, true),
+        (#""unsafe(); Unsafe: too late""#, false),
+        (#""unsafe()""#, false),
+        (#""Unsafe: prior \(value)unsafe()""#, true),
+        (#""\(value)unsafe()""#, false),
+        (#""\(consume("Unsafe:"))unsafe()""#, false),
+        (#""Unsafe:"; "unsafe()""#, false),
+        (#""Uns\(value)afe: unsafe()""#, false),
+        (#""unsa\(value)fe()""#, true),
+        (#""// unsafe()""#, true),
+        (##"#"Unsafe: reason; \#u{75}nsafe()"#"##, true),
+        (#""Unsafe: reason; unsafe(); unsafe()""#, true),
+        (#""unsafe(); Unsafe: reason; unsafe()""#, false)
+    ])
+    func literalReasonsMustPrecedeTheConstruct(source: String, passes: Bool) throws {
+        let match = #"{"kind":"stringLiteral","tokens":["unsafe","("],"reasonMarkers":["Unchecked:","Unsafe:"]}"#
+        #expect(try scan(source, match: match).violations.isEmpty == passes)
+    }
+
+    @Test func multilineReasonsAndSegmentAnchors() throws {
+        let source = #"""
+            let covered = """
+                // Unsafe: generated conformance
+                struct Generated {}
+                unsafe()
+                """
+            let uncovered = """
+                let ordinary = 0
+                unsafe()
+                """
+            let split = """
+                unsafe
+                ()
+                """
+            let interpolation = """
+                unsa\(name)fe()
+                """
+            """#
+        let tokens = #"{"kind":"stringLiteral","tokens":["unsafe","("]"#
+        let reasons = try scan(source, match: tokens + #","reasonMarkers":["Unsafe:"]}"#)
+        #expect(reasons.violations.map(\.line) == [8, 11])
+        #expect(reasons.violations.map(\.column) == [5, 5])
+        #expect(try scan(source, match: tokens + "}").violations.map(\.line) == [4, 8, 11])
+        let text = #"{"kind":"stringLiteral","text":"unsafe\n()"}"#
+        #expect(try scan(source, match: text).violations.map(\.line) == [11])
+    }
+
+    @Test func escapedContentUsesItsSegmentStart() throws {
+        let source = #"let value = "prefix \u{75}nsafe()""#
+        let report = try scan(source, match: #"{"kind":"stringLiteral","tokens":["unsafe","("]}"#)
+        #expect(report.violations.map(\.column) == [14])
+    }
+
+    @Test func reasonMarkersWorkWithExactGroupsAndInterpolation() throws {
+        let match = #"{"kind":"stringLiteral","text":"unsafe()","reasonMarkers":["Unsafe:"]}"#
+        #expect(try scan(#""Unsafe: documented\(value)unsafe()""#, match: match).violations.isEmpty)
+        #expect(try scan(#""unsafe()\(value)Unsafe:""#, match: match).violations.map(\.column) == [2])
+    }
+
     @Test(arguments: [1, 2])
     func stringAllowancesCountLiteralsInsteadOfTokenStarts(expected: Int) throws {
         let source = "let text = \"Task" + ".sleep(); Task" + ".sleep()\""
@@ -53,7 +114,7 @@ struct Version2Tests {
     @Test func generatedStringCodeUsesDecodedSegmentsAndSwiftParser() throws {
         let match = #"{"kind":"stringLiteral","tokens":["Task",".","sleep"]}"#
         let report = try scan(fixture("v2-strings"), match: match)
-        #expect(report.violations.map(\.line) == [1, 2, 3, 4, 12, 13, 17, 18, 19, 23, 24, 25])
+        #expect(report.violations.map(\.line) == [1, 2, 3, 5, 12, 13, 17, 18, 20, 23, 24, 25])
         #expect(report.violations.filter { $0.line == 18 }.count == 1)
         #expect(try scan("// \"Task" + ".sleep()\"", match: match).violations.isEmpty)
     }
@@ -64,7 +125,7 @@ struct Version2Tests {
         let match = #"{"kind":"stringLiteral","text":\#(encoded)}"#
         #expect(try scan(fixture("v2-strings"), match: match).violations.map(\.line) == [1, 2, 3, 12, 13, 17])
         let multiline = #"{"kind":"stringLiteral","text":"try await Task\n.sleep(for: .seconds(1))"}"#
-        #expect(try scan(fixture("v2-strings"), match: multiline).violations.map(\.line) == [4, 19])
+        #expect(try scan(fixture("v2-strings"), match: multiline).violations.map(\.line) == [5, 20])
     }
 
     @Test func stringAndCodeRulesKeepSeparateBoundaries() throws {
@@ -417,7 +478,7 @@ struct Version2Tests {
     @Test func exactTextMatchesEachInterpolationFreeGroup() throws {
         let source = #""marker\(value)suffix"; "prefix\(value)marker"; "mark\(value)er"; "markers"; "marker\(value)marker""#
         let report = try scan(source, match: #"{"kind":"stringLiteral","text":"marker"}"#)
-        #expect(report.violations.map(\.column) == [1, 25, 78])
+        #expect(report.violations.map(\.column) == [2, 40, 79])
     }
 
     @Test(arguments: ["prefix", "suffix"])
