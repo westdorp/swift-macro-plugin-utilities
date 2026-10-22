@@ -1,0 +1,23 @@
+import Network
+@preconcurrency
+import
+Network
+import NetworkExtension
+import struct Network.Connection
+#if canImport(
+    Network
+)
+import Foundation
+#elseif canImport(NetworkExtension)
+import NewModule
+#endif
+#if DEBUG && canImport(Network, _version: 1.2)
+let marker = 0
+#endif
+let notCondition = canImport(Network)
+let text = "import Network #if canImport(Network)"
+// import Network
+#if canImport(Foundation)
+#endif
+import func Network.make
+@_exported import Network

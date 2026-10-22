@@ -3,11 +3,14 @@ import SwiftSyntax
 
 extension RuleMatcher {
     func positions(in tree: SourceFileSyntax) -> [AbsolutePosition] {
-        switch self {
+        if let condition, !condition.holds(in: tree) { return [] }
+        switch check {
         case .occurrences(let matcher, let context):
             return matcher.matchingTokens(in: tree)
                 .filter { context?.allows($0) ?? true }
                 .map(\.positionAfterSkippingLeadingTrivia)
+        case .required(let requirement):
+            return requirement.isPresent(in: tree) ? [] : [AbsolutePosition(utf8Offset: 0)]
         }
     }
 }
@@ -43,7 +46,80 @@ private extension OccurrenceMatcher {
                 if arguments.count == 1, let argument = arguments.first, validation.accepts(argument.expression) { return nil }
                 return call.calledExpression.firstToken(viewMode: .sourceAccurate)
             }
+        case .import(let pattern):
+            return SyntaxMatches.tokens(in: tree, match: pattern.match)
         }
+    }
+}
+
+private extension FileCondition {
+    func holds(in tree: SourceFileSyntax) -> Bool {
+        !SyntaxMatches.tokens(in: tree, match: { syntax in
+            guard let declaration = syntax.as(ImportDeclSyntax.self),
+                let module = declaration.path.first?.name, module.guardrailText == imports.text
+            else { return nil }
+            return module
+        }).isEmpty
+    }
+}
+
+private extension FileRequirement {
+    func isPresent(in tree: SourceFileSyntax) -> Bool {
+        switch self {
+        case .attribute(let name):
+            return !SyntaxMatches.tokens(in: tree, match: { syntax in
+                guard let attribute = syntax.as(AttributeSyntax.self),
+                    SyntaxName.components(of: attribute.attributeName) == name.components
+                else { return nil }
+                return attribute.atSign
+            }).isEmpty
+        case .import(let pattern):
+            return !SyntaxMatches.tokens(in: tree, match: pattern.match).isEmpty
+        }
+    }
+}
+
+private extension ImportPattern {
+    func match(_ syntax: Syntax) -> TokenSyntax? {
+        switch self {
+        case .declaration(let selection, let kind):
+            return Self.declaration(syntax, selection: selection, kind: kind)
+        case .canImport(let selection):
+            return Self.condition(syntax, selection: selection)
+        case .either(let selection):
+            return Self.declaration(syntax, selection: selection, kind: .any) ?? Self.condition(syntax, selection: selection)
+        }
+    }
+
+    static func declaration(_ syntax: Syntax, selection: ModuleSelection, kind: ImportKind) -> TokenSyntax? {
+        guard let declaration = syntax.as(ImportDeclSyntax.self),
+            let module = declaration.path.first?.name, selection.matches(module), kind.matches(declaration)
+        else { return nil }
+        return declaration.firstToken(viewMode: .sourceAccurate)
+    }
+
+    static func condition(_ syntax: Syntax, selection: ModuleSelection) -> TokenSyntax? {
+        guard let call = syntax.as(FunctionCallExprSyntax.self),
+            let reference = call.calledExpression.as(DeclReferenceExprSyntax.self), reference.baseName.guardrailText == "canImport",
+            let argument = call.arguments.first,
+            let module = firstModule(in: argument.expression), selection.matches(module), isCompilationCondition(syntax)
+        else { return nil }
+        return reference.baseName
+    }
+
+    static func firstModule(in expression: ExprSyntax) -> TokenSyntax? {
+        if let reference = expression.as(DeclReferenceExprSyntax.self) { return reference.baseName }
+        if let member = expression.as(MemberAccessExprSyntax.self), let base = member.base { return firstModule(in: base) }
+        return nil
+    }
+
+    static func isCompilationCondition(_ syntax: Syntax) -> Bool {
+        var child = syntax
+        while let parent = child.parent {
+            if let clause = parent.as(IfConfigClauseSyntax.self) { return clause.condition?.id == child.id }
+            child = parent
+        }
+        return false
     }
 }
 

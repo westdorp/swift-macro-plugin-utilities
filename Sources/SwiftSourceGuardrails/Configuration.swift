@@ -94,7 +94,7 @@ struct GuardrailConfiguration: Decodable {
         let matcher: RuleMatcher
         let scope: Scope
 
-        enum CodingKeys: String, CodingKey, CaseIterable { case id, match, paths, scope, context }
+        enum CodingKeys: String, CodingKey, CaseIterable { case id, match, paths, scope, context, when }
 
         init(from decoder: any Decoder) throws {
             try decoder.rejectUnknownKeys(CodingKeys.self)
@@ -104,7 +104,9 @@ struct GuardrailConfiguration: Decodable {
                 throw GuardrailInputError("Rule id must be nonblank")
             }
             let match = try values.decode(RuleMatcher.self, forKey: .match)
-            matcher = values.contains(.context) ? match.inContext(try values.decode(LexicalContext.self, forKey: .context)) : match
+            let context = values.contains(.context) ? try values.decode(LexicalContext.self, forKey: .context) : nil
+            let condition = values.contains(.when) ? try values.decode(FileCondition.self, forKey: .when) : nil
+            matcher = try match.applying(context: context, condition: condition)
             switch (values.contains(.paths), values.contains(.scope)) {
             case (true, false):
                 let paths = try values.decode([RelativePath].self, forKey: .paths)

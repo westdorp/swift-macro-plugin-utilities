@@ -146,6 +146,56 @@ parentheses, variables, floats, zero and overflow fail. `nonemptyStringLiteral`
 requires a noninterpolated string literal with a nonblank decoded value, suitable
 for a named `reason` argument. Neither validator evaluates expressions.
 
+### Imports, file conditions and required attributes
+
+```json
+{
+  "kind": "import",
+  "module": {"kind":"exact", "name":"Network"},
+  "form": "declaration",
+  "importKind": "any",
+  "presence": "forbidden"
+}
+```
+
+All shown fields are required. `module` selects the first import-path component:
+`exact` matches that name, `except` matches every other name (including new
+modules), and `{"kind":"any"}` matches all modules and must not contain `name`.
+This example bans `import Network`, `@preconcurrency import Network`, and
+scoped imports such as `import struct Network.Connection`, while allowing
+`import NetworkExtension`. Attributes and multiline forms do not change the
+module identity.
+
+`form` is `declaration`, `canImport`, or `either`. `importKind` is `any`,
+`module` (unscoped import), `typealias`, `struct`, `class`, `enum`, `protocol`,
+`let`, `var`, or `func`. `canImport` and `either` require `importKind: "any"`.
+`canImport` checks only calls in `#if`/`#elseif` conditions, matching the first
+module component of the first argument; optional version arguments are ignored.
+A similarly named call in executable code, a comment or string does not count.
+Every compilation branch is inspected; conditions are never evaluated.
+
+`presence: "forbidden"` reports each matching declaration/condition at its first
+token. `presence: "required"` reports once at file location 1:1 when no selected
+declaration/condition exists. A Foundation-only policy uses
+`module: {"kind":"except","name":"Foundation"}` with `form: "declaration"`;
+an all-module condition ban uses `module: {"kind":"any"}` with `form: "canImport"`.
+
+Any v2 rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
+applies only to files containing an import declaration of that module, including
+scoped/attributed imports and imports in inactive branches. A `canImport` condition
+alone does not satisfy this file condition. Files are still parsed and malformed
+Swift still fails closed when a rule's condition is false.
+
+`{"kind":"requireAttribute","name":["MainActor"]}` requires an
+`AttributeSyntax` with that exact name anywhere in each file. Qualified names
+use component arrays; generic arguments are ignored. For example,
+`["unchecked"]` finds the annotation in `: @unchecked Sendable`. It does not
+match plain declaration modifiers, comments or generated string text. Missing
+presence reports once at 1:1, including empty files. Required import/attribute
+rules accept file conditions but reject lexical contexts, because their
+requirement applies to the whole file. Allowlists count each missing-presence
+finding as one violation.
+
 ## Swift classification and limits
 
 SwiftParser determines code, comments, normal/escaped/raw/multiline strings, and

@@ -4,6 +4,121 @@ import Testing
 
 struct Version2Tests {
     @Test(arguments: [
+        ("declaration", "any", [1, 2, 6, 22, 23]),
+        ("declaration", "module", [1, 2, 23]),
+        ("declaration", "struct", [6]),
+        ("declaration", "func", [22]),
+        ("canImport", "any", [7, 14]),
+        ("either", "any", [1, 2, 6, 7, 14, 22, 23])
+    ])
+    func importsUseExactModulesAndSyntaxKinds(form: String, kind: String, lines: [Int]) throws {
+        let match = importMatch(form: form, kind: kind)
+        #expect(try scan(fixture("v2-imports"), match: match).violations.map(\.line) == lines)
+        #expect(try scan("import NetworkExtension", match: match).violations.isEmpty)
+    }
+
+    @Test(arguments: ["typealias", "struct", "class", "enum", "protocol", "let", "var", "func"])
+    func eachScopedImportKindIsDistinct(kind: String) throws {
+        let source = "import \(kind) Network.Symbol\nimport Network\nimport struct Other.Symbol"
+        #expect(try scan(source, match: importMatch(kind: kind)).violations.map(\.line) == [1])
+    }
+
+    @Test func foundationComplementAndAnyCanImportCoverUnknownModules() throws {
+        let except = #"{"kind":"except","name":"Foundation"}"#
+        let declaration = importMatch(selection: except)
+        #expect(try scan("import Foundation\nimport NewlyIntroducedModule", match: declaration).violations.map(\.line) == [2])
+        let condition = importMatch(selection: #"{"kind":"any"}"#, form: "canImport")
+        #expect(try scan(fixture("v2-imports"), match: condition).violations.map(\.line) == [7, 11, 14, 20])
+        let complement = importMatch(selection: except, form: "canImport")
+        #expect(try scan(fixture("v2-imports"), match: complement).violations.map(\.line) == [7, 11, 14])
+    }
+
+    @Test func requiredImportReportsAtFileStartAndChecksAllBranches() throws {
+        let match = importMatch(presence: "required")
+        let missing = try scan("// import Network\nlet text = \"import Network\"", match: match)
+        #expect(missing.violations.map(\.line) == [1])
+        #expect(missing.violations.map(\.column) == [1])
+        #expect(try scan("", match: match).violations.count == 1)
+        #expect(try scan("#if NEVER\n@preconcurrency import Network\n#endif", match: match).violations.isEmpty)
+        let condition = importMatch(form: "canImport", presence: "required")
+        #expect(try scan("import Network", match: condition).violations.count == 1)
+        #expect(try scan("#if canImport(Network)\n#endif", match: condition).violations.isEmpty)
+    }
+
+    @Test(arguments: [
+        ("import Foundation\npause()", true),
+        ("@preconcurrency import Foundation\npause()", true),
+        ("import struct Foundation.Date\npause()", true),
+        ("#if NEVER\nimport Foundation\n#endif\npause()", true),
+        ("import FoundationExtension\npause()", false),
+        ("#if canImport(Foundation)\n#endif\npause()", false),
+        ("// import Foundation\nlet text = \"import Foundation\"\npause()", false)
+    ])
+    func fileImportConditionsUseDeclarations(source: String, applies: Bool) throws {
+        let fields = #","when":{"imports":"Foundation"}"#
+        #expect(try scan(source, match: #"{"kind":"call","name":["pause"]}"#, fields: fields).violations.isEmpty == (applies == false))
+    }
+
+    @Test(arguments: [
+        ("@MainActor\nfunc run() {}", true),
+        ("#if NEVER\n@MainActor struct Example {}\n#endif", true),
+        ("// @MainActor\nlet annotation = \"@MainActor\"", false),
+        ("@OtherActor func run() {}", false),
+        ("", false)
+    ])
+    func requiredAttributeIsFilePresence(source: String, present: Bool) throws {
+        let match = #"{"kind":"requireAttribute","name":["MainActor"]}"#
+        let report = try scan(source, match: match)
+        #expect(report.violations.isEmpty == present)
+        #expect(report.violations.allSatisfy { $0.line == 1 && $0.column == 1 })
+    }
+
+    @Test func requiredQualifiedAndUncheckedAttributesUseTypeSyntax() throws {
+        #expect(try scan("@Module.Annotation<Int> func run() {}", match: #"{"kind":"requireAttribute","name":["Module","Annotation"]}"#).violations.isEmpty)
+        #expect(try scan("struct Example: @unchecked Sendable {}", match: #"{"kind":"requireAttribute","name":["unchecked"]}"#).violations.isEmpty)
+        let match = #"{"kind":"requireAttribute","name":["Annotation"]}"#
+        #expect(try scan("@Module.Annotation func run() {}", match: match).violations.count == 1)
+    }
+
+    @Test func requiredPresenceCannotHaveContextButCanHaveFileCondition() throws {
+        let match = #"{"kind":"requireAttribute","name":["MainActor"]}"#
+        let context = #","context":{"relation":"inside","kind":"type","name":"Adapter"}"#
+        #expect(throws: GuardrailInputError.self) { try configuration(match: match, fields: context) }
+        #expect(throws: GuardrailInputError.self) { try configuration(match: importMatch(presence: "required"), fields: context) }
+        #expect(try scan("let ordinary = 0", match: match, fields: #","when":{"imports":"Foundation"}"#).violations.isEmpty)
+        #expect(try scan("import Foundation", match: match, fields: #","when":{"imports":"Foundation"}"#).violations.count == 1)
+    }
+
+    @Test(arguments: [#"null"#, #"{}"#, #"{"imports":"A.B"}"#, #"{"imports":"Foundation","extra":true}"#])
+    func malformedFileConditionsAreRejected(condition: String) {
+        #expect(throws: GuardrailInputError.self) {
+            try configuration(match: #"{"kind":"tokens","tokens":["x"]}"#, fields: #","when":\#(condition)"#)
+        }
+    }
+
+    @Test(arguments: [
+        #"{"kind":"any","name":"Network"}"#,
+        #"{"kind":"except"}"#,
+        #"{"kind":"exact","name":"A.B"}"#,
+        #"{"kind":"wildcard","name":"Net*"}"#
+    ])
+    func malformedModuleSelectionsAreRejected(selection: String) {
+        #expect(throws: GuardrailInputError.self) { try configuration(match: importMatch(selection: selection)) }
+    }
+
+    @Test(arguments: [("canImport", "module"), ("either", "struct"), ("unknown", "any"), ("declaration", "unknown")])
+    func incompatibleImportFormsAreRejected(form: String, kind: String) {
+        #expect(throws: GuardrailInputError.self) { try configuration(match: importMatch(form: form, kind: kind)) }
+    }
+
+    private func importMatch(
+        selection: String = #"{"kind":"exact","name":"Network"}"#,
+        form: String = "declaration", kind: String = "any", presence: String = "forbidden"
+    ) -> String {
+        #"{"kind":"import","module":\#(selection),"form":"\#(form)","importKind":"\#(kind)","presence":"\#(presence)"}"#
+    }
+
+    @Test(arguments: [
         (#"{"kind":"call","name":["Task"]}"#, [1, 2, 6]),
         (#"{"kind":"call","name":["Task","sleep"]}"#, [9]),
         (#"{"kind":"member","name":["Task","sleep"]}"#, [8, 9, 17]),
