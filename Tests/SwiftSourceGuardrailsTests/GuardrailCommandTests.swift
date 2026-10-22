@@ -29,7 +29,7 @@ struct GuardrailCommandTests {
         let fixture = try CommandFixture()
         defer { fixture.remove() }
         let command = try fixture.command(scanExitCode: scanExitCode)
-        let failure = CocoaError(.fileWriteNoPermission)
+        let failure = WriteFailure()
         var attemptedStreams: [FailingStream] = []
         do {
             try command.run(writeOutput: { _ in
@@ -41,9 +41,9 @@ struct GuardrailCommandTests {
             })
             Issue.record("Output failure was swallowed")
         } catch {
-            #expect(error as? CocoaError == failure)
+            #expect(error is WriteFailure)
             #expect(SwiftSourceGuardrails.exitCode(for: error).rawValue == 1)
-            #expect(SwiftSourceGuardrails.fullMessage(for: error).contains(failure.localizedDescription))
+            #expect(SwiftSourceGuardrails.fullMessage(for: error).contains(WriteFailure.description))
         }
         #expect(attemptedStreams == (stream == .standardOutput ? [.standardOutput] : [.standardOutput, .standardError]))
     }
@@ -51,6 +51,11 @@ struct GuardrailCommandTests {
     enum FailingStream: Sendable {
         case standardOutput
         case standardError
+    }
+
+    struct WriteFailure: LocalizedError {
+        static let description = "guardrail output write failed"
+        var errorDescription: String? { Self.description }
     }
 
     @Test func documentedArgumentsUseArgumentParser() throws {
