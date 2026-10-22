@@ -56,6 +56,22 @@ struct GuardrailCommandTests {
         #expect(report.violations.isEmpty)
     }
 
+    @Test(arguments: [
+        #"{}"#, #"null"#, #"{"prefix":""}"#, #"{"prefix":"NIO.*"}"#,
+        #"{"prefix":12}"#, #"{"prefix":null}"#, #"{"prefix":"NIO","extra":true}"#,
+        #"{"exact":"NIO"}"#, #"{"prefix":["NIO"]}"#
+    ])
+    func invalidImportPrefixesExitTwo(imports: String) throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        try fixture.write("guardrails.json", #"{"version":2,"rules":[{"id":"bad","paths":["Sources"],"match":{"kind":"call","name":["pause"]},"when":{"imports":\#(imports)}}],"allowlist":[]}"#)
+        let report = GuardrailCommand.scan(config: fixture.config, root: fixture.root)
+        #expect(report.exitCode == 2)
+        #expect(report.errors.isEmpty == false)
+        #expect(report.scannedFiles == 0)
+        #expect(report.violations.isEmpty)
+    }
+
     @Test func version2MalformedSourceDiscardsEarlierFindingsEvenWhenConditionIsFalse() throws {
         let fixture = try CommandFixture()
         defer { fixture.remove() }

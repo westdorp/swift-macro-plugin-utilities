@@ -103,6 +103,34 @@ struct Version2Tests {
         #expect(report.exitCode == (missing ? 0 : 1))
     }
 
+    @Test(arguments: [
+        ("import NIO", true),
+        ("import NIOCore", true),
+        ("import NIOCore.Submodule", true),
+        ("@preconcurrency\nimport struct\nNIOPosix.EventLoop", true),
+        ("#if NEVER\nimport NIOHTTP1\n#endif", true),
+        ("import `NIOCore`", true),
+        ("import OtherNIO", false),
+        ("import niocore", false),
+        ("#if canImport(NIOCore)\n#endif", false),
+        ("// import NIOCore", false),
+        (#"let text = "import NIOCore""#, false),
+        ("", false)
+    ])
+    func importedModulePrefixesSelectFiles(imports: String, selected: Bool) throws {
+        let fields = #","when":{"imports":{"prefix":"NIO"}}"#
+        let source = imports + "\npause()"
+        #expect(try scan(source, match: #"{"kind":"call","name":["pause"]}"#, fields: fields).violations.count == (selected ? 1 : 0))
+        #expect(try scan(source, match: #"{"kind":"requireAttribute","name":["MainActor"]}"#, fields: fields).violations.count == (selected ? 1 : 0))
+    }
+
+    @Test func exactImportedModuleConditionsRetainTheirBoundary() throws {
+        let match = #"{"kind":"call","name":["pause"]}"#
+        let fields = #","when":{"imports":"NIO"}"#
+        #expect(try scan("import NIOCore\npause()", match: match, fields: fields).violations.isEmpty)
+        #expect(try scan("import NIO\npause()", match: match, fields: fields).violations.count == 1)
+    }
+
     @Test func fileConditionAndLexicalContextCompose() throws {
         let fields = #","when":{"imports":"Foundation"},"context":{"relation":"outside","kind":"type","name":"Adapter"}"#
         let source = "import Foundation\nstruct Adapter { func run() { pause() } }\nstruct Other { func run() { pause() } }"

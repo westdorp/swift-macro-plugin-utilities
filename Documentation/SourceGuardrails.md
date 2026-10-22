@@ -224,8 +224,12 @@ an all-module condition ban uses `module: {"kind":"any"}` with `form: "canImport
 
 Any v2 rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
 applies only to files containing an import declaration of that module, including
-scoped/attributed imports and imports in inactive branches. A `canImport` condition
-alone does not satisfy this file condition. Files are still parsed and malformed
+scoped/attributed imports and imports in inactive branches. The typed form
+`"when": {"imports":{"prefix":"NIO"}}` instead selects files importing any
+module whose first component starts with `NIO`, such as `NIO`, `NIOCore` or
+`NIOHTTP1`. The prefix must be one Swift name; comparison is case sensitive,
+with no glob or regex syntax. The existing string form remains exact.
+A `canImport` condition alone does not satisfy this file condition. Files are still parsed and malformed
 Swift still fails closed when a rule's condition is false.
 
 `{"kind":"requireAttribute","name":["MainActor"]}` requires an

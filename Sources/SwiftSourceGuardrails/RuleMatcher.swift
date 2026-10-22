@@ -125,12 +125,36 @@ enum FileRequirement {
 }
 
 struct FileCondition: Decodable {
-    let imports: SwiftName
+    let imports: ImportedModulePattern
     private enum CodingKeys: String, CodingKey, CaseIterable { case imports }
 
     init(from decoder: any Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
-        imports = try decoder.container(keyedBy: CodingKeys.self).decode(SwiftName.self, forKey: .imports)
+        imports = try decoder.container(keyedBy: CodingKeys.self).decode(ImportedModulePattern.self, forKey: .imports)
+    }
+}
+
+enum ImportedModulePattern: Decodable {
+    case exact(SwiftName)
+    case prefix(SwiftName)
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case prefix }
+
+    init(from decoder: any Decoder) throws {
+        if let _ = try? decoder.singleValueContainer().decode(String.self) {
+            self = .exact(try SwiftName(from: decoder))
+        } else {
+            try decoder.rejectUnknownKeys(CodingKeys.self)
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            self = .prefix(try values.decode(SwiftName.self, forKey: .prefix))
+        }
+    }
+
+    func matches(_ modules: Set<String>) -> Bool {
+        switch self {
+        case .exact(let name): return modules.contains(name.text)
+        case .prefix(let name): return modules.contains { $0.hasPrefix(name.text) }
+        }
     }
 }
 

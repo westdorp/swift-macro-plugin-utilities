@@ -11,7 +11,7 @@ extension RuleMatcher {
         }
         let runs = needsTokens ? CodeTokens.runs(in: tree) : []
         return matchers.enumerated().map { index, matcher in
-            if let condition = matcher.condition, !visitor.imports.contains(condition.imports.text) { return [] }
+            if let condition = matcher.condition, !condition.imports.matches(visitor.imports) { return [] }
             switch matcher.check {
             case .occurrences(let occurrence, let context):
                 let tokens: [TokenSyntax]
