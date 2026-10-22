@@ -102,6 +102,13 @@ backticks; they have no wildcard or regular expression syntax. `token` includes 
 `function` checks only function declaration names. Comments, string text and
 regex contents do not count. Multiline declarations are handled by SwiftSyntax.
 
+A prefix pattern may add `"nextIsUppercase": true`, for example
+`{"kind":"prefix","text":"test","nextIsUppercase":true}`. It then requires an
+actual following Unicode uppercase letter: `testFoo` matches, while `test`,
+`testing`, `test1` and `test_Value` do not. Omitting the option or setting it to
+`false` preserves ordinary prefix matching. The option is invalid for suffix
+patterns, including when set to `false`.
+
 To migrate a v1 rule, move its `tokens` array into a `match` object of kind
 `tokens`, keep `id` and `paths`, and change the configuration version to `2`.
 Then replace repeated `paths` arrays with a named `scope` where useful.
@@ -186,6 +193,28 @@ parentheses, variables, floats, zero and overflow fail. `nonemptyStringLiteral`
 requires a noninterpolated string literal with a nonblank decoded value, suitable
 for a named `reason` argument. Neither validator evaluates expressions.
 
+For an unlabeled parenthesized argument, replace `label` with a zero-based,
+nonnegative integer `position`. The selected argument must exist and be
+unlabeled. Other arguments are allowed. Specify exactly one of `label` and
+`position`; neither form evaluates expressions.
+
+A typed nested-call validator checks `.timeLimit(.minutes(N))`:
+
+```json
+{"kind":"argument", "call":["timeLimit"], "position":0,
+ "validation":{"kind":"call", "name":["minutes"],
+               "validation":"positiveIntegerLiteral"}}
+```
+
+The selected value must itself be a call to the exact syntax name with exactly
+one unlabeled parenthesized argument and no trailing closure. That inner argument
+must satisfy the named literal validator (`positiveIntegerLiteral` or
+`nonemptyStringLiteral`). Missing, extra, labeled, computed and wrong-callee
+values fail once at the outer call, as do zero, signed and overflowing integers.
+Nested-call validation also works with a named outer `label`. Only this one
+level of nesting is supported; the inner validator must be a literal validator.
+Existing string-valued validators keep their behavior.
+
 ### Imports, file conditions and required attributes
 
 ```json
@@ -224,8 +253,12 @@ an all-module condition ban uses `module: {"kind":"any"}` with `form: "canImport
 
 Any v2 rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
 applies only to files containing an import declaration of that module, including
-scoped/attributed imports and imports in inactive branches. A `canImport` condition
-alone does not satisfy this file condition. Files are still parsed and malformed
+scoped/attributed imports and imports in inactive branches. The typed form
+`"when": {"imports":{"prefix":"NIO"}}` instead selects files importing any
+module whose first component starts with `NIO`, such as `NIO`, `NIOCore` or
+`NIOHTTP1`. The prefix must be one Swift name; comparison is case sensitive,
+with no glob or regex syntax. The existing string form remains exact.
+A `canImport` condition alone does not satisfy this file condition. Files are still parsed and malformed
 Swift still fails closed when a rule's condition is false.
 
 `{"kind":"requireAttribute","name":["MainActor"]}` requires an
@@ -259,14 +292,41 @@ ignoring embedded Swift comments, strings and regexes. Content can be an
 incomplete Swift fragment; it need not compile or form a complete syntax tree.
 No regular expression is applied to source or literal content.
 
-Each matching literal reports once at its original opening delimiter, regardless
-of multiple groups or token starts. Interpolation expressions remain ordinary
+Each matching literal reports once at the start of the `StringSegmentSyntax`
+containing the first match. A match spanning segments uses the first segment
+containing matched content. Multiline literals have a segment per line; an
+escaped or raw spelling uses its containing segment's start, without mapping
+individual decoded characters back to source bytes. Multiple groups or token
+starts still count as one finding per literal. Interpolation expressions remain ordinary
 code; nested literals within them are checked independently. For example,
 `"Task.\(name)sleep()"` cannot match `["Task",".","sleep"]`, while
 `"prefix \(name)Task.sleep()"` can. Compiler-directive
 `SimpleStringLiteralExprSyntax` nodes, such as the filename in `#sourceLocation`,
 are excluded. File conditions and lexical contexts work as for other occurrence
 rules. Missing-presence rules never parse generated code.
+
+A string rule may require a literal reason marker before the matched construct:
+
+```json
+{"kind":"stringLiteral", "tokens":["unsafe","("],
+ "reasonMarkers":["Unchecked:","Unsafe:"]}
+```
+
+`reasonMarkers` is optional. When present it must be a nonempty array of
+nonblank literal strings. Any one marker, fully before the match, satisfies the
+rule. Markers are searched in decoded literal text, including generated comments,
+across earlier lines and segments of the same literal. There is no proximity
+limit. A marker in an earlier interpolation-free group counts, but a marker
+cannot be assembled across an interpolation; expression contents and other
+literals supply no reason. A marker after the construct does not satisfy it.
+The first match without an earlier marker reports once at its segment start.
+The option works with both `text` and `tokens`; exact `text` still matches a
+complete interpolation-free group.
+
+Migration from 0.5.0: v2 string rules previously reported at the literal's opening
+delimiter. Existing `text` and `tokens` rules now use the matched segment anchor
+described above, which can change line/column diagnostics. Matching and allowance
+counts are unchanged. V1 matching and locations are unchanged.
 
 ## Swift classification and limits
 

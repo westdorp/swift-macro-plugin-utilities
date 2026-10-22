@@ -22,6 +22,67 @@ struct Version2Tests {
         #expect(try encoder.encode(v1) == encoder.encode(v2))
     }
 
+    @Test(arguments: [
+        (#""Unsafe: documented; unsafe()""#, true),
+        (#""Unchecked: documented; unsafe()""#, true),
+        (#""unsafe(); Unsafe: too late""#, false),
+        (#""unsafe()""#, false),
+        (#""Unsafe: prior \(value)unsafe()""#, true),
+        (#""\(value)unsafe()""#, false),
+        (#""\(consume("Unsafe:"))unsafe()""#, false),
+        (#""Unsafe:"; "unsafe()""#, false),
+        (#""Uns\(value)afe: unsafe()""#, false),
+        (#""unsa\(value)fe()""#, true),
+        (#""// unsafe()""#, true),
+        (##"#"Unsafe: reason; \#u{75}nsafe()"#"##, true),
+        (#""Unsafe: reason; unsafe(); unsafe()""#, true),
+        (#""unsafe(); Unsafe: reason; unsafe()""#, false)
+    ])
+    func literalReasonsMustPrecedeTheConstruct(source: String, passes: Bool) throws {
+        let match = #"{"kind":"stringLiteral","tokens":["unsafe","("],"reasonMarkers":["Unchecked:","Unsafe:"]}"#
+        #expect(try scan(source, match: match).violations.isEmpty == passes)
+    }
+
+    @Test func multilineReasonsAndSegmentAnchors() throws {
+        let source = #"""
+            let covered = """
+                // Unsafe: generated conformance
+                struct Generated {}
+                unsafe()
+                """
+            let uncovered = """
+                let ordinary = 0
+                unsafe()
+                """
+            let split = """
+                unsafe
+                ()
+                """
+            let interpolation = """
+                unsa\(name)fe()
+                """
+            """#
+        let tokens = #"{"kind":"stringLiteral","tokens":["unsafe","("]"#
+        let reasons = try scan(source, match: tokens + #","reasonMarkers":["Unsafe:"]}"#)
+        #expect(reasons.violations.map(\.line) == [8, 11])
+        #expect(reasons.violations.map(\.column) == [5, 5])
+        #expect(try scan(source, match: tokens + "}").violations.map(\.line) == [4, 8, 11])
+        let text = #"{"kind":"stringLiteral","text":"unsafe\n()"}"#
+        #expect(try scan(source, match: text).violations.map(\.line) == [11])
+    }
+
+    @Test func escapedContentUsesItsSegmentStart() throws {
+        let source = #"let value = "prefix \u{75}nsafe()""#
+        let report = try scan(source, match: #"{"kind":"stringLiteral","tokens":["unsafe","("]}"#)
+        #expect(report.violations.map(\.column) == [14])
+    }
+
+    @Test func reasonMarkersWorkWithExactGroupsAndInterpolation() throws {
+        let match = #"{"kind":"stringLiteral","text":"unsafe()","reasonMarkers":["Unsafe:"]}"#
+        #expect(try scan(#""Unsafe: documented\(value)unsafe()""#, match: match).violations.isEmpty)
+        #expect(try scan(#""unsafe()\(value)Unsafe:""#, match: match).violations.map(\.column) == [2])
+    }
+
     @Test(arguments: [1, 2])
     func stringAllowancesCountLiteralsInsteadOfTokenStarts(expected: Int) throws {
         let source = "let text = \"Task" + ".sleep(); Task" + ".sleep()\""
@@ -42,6 +103,34 @@ struct Version2Tests {
         #expect(report.exitCode == (missing ? 0 : 1))
     }
 
+    @Test(arguments: [
+        ("import NIO", true),
+        ("import NIOCore", true),
+        ("import NIOCore.Submodule", true),
+        ("@preconcurrency\nimport struct\nNIOPosix.EventLoop", true),
+        ("#if NEVER\nimport NIOHTTP1\n#endif", true),
+        ("import `NIOCore`", true),
+        ("import OtherNIO", false),
+        ("import niocore", false),
+        ("#if canImport(NIOCore)\n#endif", false),
+        ("// import NIOCore", false),
+        (#"let text = "import NIOCore""#, false),
+        ("", false)
+    ])
+    func importedModulePrefixesSelectFiles(imports: String, selected: Bool) throws {
+        let fields = #","when":{"imports":{"prefix":"NIO"}}"#
+        let source = imports + "\npause()"
+        #expect(try scan(source, match: #"{"kind":"call","name":["pause"]}"#, fields: fields).violations.count == (selected ? 1 : 0))
+        #expect(try scan(source, match: #"{"kind":"requireAttribute","name":["MainActor"]}"#, fields: fields).violations.count == (selected ? 1 : 0))
+    }
+
+    @Test func exactImportedModuleConditionsRetainTheirBoundary() throws {
+        let match = #"{"kind":"call","name":["pause"]}"#
+        let fields = #","when":{"imports":"NIO"}"#
+        #expect(try scan("import NIOCore\npause()", match: match, fields: fields).violations.isEmpty)
+        #expect(try scan("import NIO\npause()", match: match, fields: fields).violations.count == 1)
+    }
+
     @Test func fileConditionAndLexicalContextCompose() throws {
         let fields = #","when":{"imports":"Foundation"},"context":{"relation":"outside","kind":"type","name":"Adapter"}"#
         let source = "import Foundation\nstruct Adapter { func run() { pause() } }\nstruct Other { func run() { pause() } }"
@@ -53,7 +142,7 @@ struct Version2Tests {
     @Test func generatedStringCodeUsesDecodedSegmentsAndSwiftParser() throws {
         let match = #"{"kind":"stringLiteral","tokens":["Task",".","sleep"]}"#
         let report = try scan(fixture("v2-strings"), match: match)
-        #expect(report.violations.map(\.line) == [1, 2, 3, 4, 12, 13, 17, 18, 19, 23, 24, 25])
+        #expect(report.violations.map(\.line) == [1, 2, 3, 5, 12, 13, 17, 18, 20, 23, 24, 25])
         #expect(report.violations.filter { $0.line == 18 }.count == 1)
         #expect(try scan("// \"Task" + ".sleep()\"", match: match).violations.isEmpty)
     }
@@ -64,7 +153,7 @@ struct Version2Tests {
         let match = #"{"kind":"stringLiteral","text":\#(encoded)}"#
         #expect(try scan(fixture("v2-strings"), match: match).violations.map(\.line) == [1, 2, 3, 12, 13, 17])
         let multiline = #"{"kind":"stringLiteral","text":"try await Task\n.sleep(for: .seconds(1))"}"#
-        #expect(try scan(fixture("v2-strings"), match: multiline).violations.map(\.line) == [4, 19])
+        #expect(try scan(fixture("v2-strings"), match: multiline).violations.map(\.line) == [5, 20])
     }
 
     @Test func stringAndCodeRulesKeepSeparateBoundaries() throws {
@@ -267,6 +356,58 @@ struct Version2Tests {
     }
 
     @Test(arguments: ["1", "0x10", "0b10", "0o10", "1_000"])
+    func nestedPositiveIntegerArgumentsPass(value: String) throws {
+        let source = """
+        .timeLimit(
+            .minutes(
+                \(value)
+            )
+        )
+        """
+        #expect(try scan(source, match: nestedTimeLimitMatch).violations.isEmpty)
+    }
+
+    @Test(arguments: [
+        ".minutes(0)", ".minutes(-1)", ".minutes(+1)", ".minutes(1.5)",
+        ".minutes((1))", ".minutes(1 + 2)", ".minutes(value)",
+        ".minutes(999999999999999999999999999999)", ".minutes()",
+        ".minutes(1, 2)", ".minutes(value: 1)", ".minutes { 1 }",
+        ".minutes(1) {}", ".seconds(1)", "Duration.minutes(1)",
+        "(.minutes(1))", #"".minutes(1)""#, "value"
+    ])
+    func nestedInvalidArgumentValuesFail(value: String) throws {
+        let source = ".timeLimit(\n\(value)\n)"
+        #expect(try scan(source, match: nestedTimeLimitMatch).violations.map(\.line) == [1])
+    }
+
+    @Test func positionalArgumentsRequireAnUnlabeledValue() throws {
+        let source = """
+        let a = .timeLimit()
+        let b = .timeLimit(limit: .minutes(1))
+        let c = .timeLimit { .minutes(1) }
+        let d = .other(.minutes(0))
+        let e = .timeLimit(.minutes(1))
+        let f = .timeLimit(.`minutes`(1))
+        """
+        #expect(try scan(source, match: nestedTimeLimitMatch).violations.map(\.line) == [1, 2, 3])
+        let second = #"{"kind":"argument","call":["schedule"],"position":1,"validation":"positiveIntegerLiteral"}"#
+        #expect(try scan("schedule(work, 1)\nschedule(work)\nschedule(work, minutes: 1)", match: second).violations.map(\.line) == [2, 3])
+    }
+
+    @Test func namedArgumentsCanValidateNestedCalls() throws {
+        let match = #"{"kind":"argument","call":["schedule"],"label":"limit","validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral"}}"#
+        #expect(try scan("schedule(limit: .minutes(1))", match: match).violations.isEmpty)
+        #expect(try scan("schedule(limit: .minutes(0))\nschedule(limit: .minutes(1), limit: .minutes(2))", match: match).violations.map(\.line) == [1, 2])
+        let reason = #"{"kind":"argument","call":["schedule"],"position":0,"validation":{"kind":"call","name":["reason"],"validation":"nonemptyStringLiteral"}}"#
+        #expect(try scan(#"schedule(.reason("valid"))"#, match: reason).violations.isEmpty)
+        #expect(try scan(#"schedule(.reason(" "))"#, match: reason).violations.count == 1)
+    }
+
+    private var nestedTimeLimitMatch: String {
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral"}}"#
+    }
+
+    @Test(arguments: ["1", "0x10", "0b10", "0o10", "1_000"])
     func positiveNamedIntegerLiteralsPass(value: String) throws {
         let source = """
         schedule<Result<Int, Error>>(
@@ -313,6 +454,36 @@ struct Version2Tests {
         #expect(throws: GuardrailInputError.self) {
             try configuration(match: #"{"kind":"call","name":["pause"]}"#, fields: #","context":\#(context)"#)
         }
+    }
+
+    @Test(arguments: [
+        ("testFoo", true), ("testing", false), ("test", false), ("test1", false),
+        ("test_Value", false), ("testÉxample", true), ("testΩ", true),
+        ("test中文", false), ("`testFoo`", true), ("TestFoo", false),
+        ("testⅧ", false), ("testᴬ", false), ("test🅰", false)
+    ], ["token", "function"])
+    func identifierPrefixesCanRequireAnUppercaseLetter(example: (String, Bool), target: String) throws {
+        let (name, matches) = example
+        let match = #"{"kind":"identifier","target":"\#(target)","pattern":{"kind":"prefix","text":"test","nextIsUppercase":true}}"#
+        let source = "func\n\(name)\n() {}"
+        let report = try scan(source, match: match)
+        #expect(report.violations.map(\.line) == (matches ? [2] : []))
+    }
+
+    @Test(arguments: ["", #", "nextIsUppercase":false"#])
+    func absentOrFalseUppercaseConstraintPreservesPrefixes(option: String) throws {
+        let match = #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test"\#(option)}}"#
+        #expect(try scan("let test = 1\nlet testing = 2\nlet testFoo = 3", match: match).violations.map(\.line) == [1, 2, 3])
+    }
+
+    @Test func uppercasePrefixRulesIgnoreLiteralTextAndComments() throws {
+        let match = #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test","nextIsUppercase":true}}"#
+        let source = #"""
+        // testFoo
+        let quoted = "testFoo"
+        let regex = /testFoo/
+        """#
+        #expect(try scan(source, match: match).violations.isEmpty)
     }
 
     @Test(arguments: [("prefix", "check", [1, 3]), ("suffix", "Clock", [4, 5])])
@@ -417,7 +588,7 @@ struct Version2Tests {
     @Test func exactTextMatchesEachInterpolationFreeGroup() throws {
         let source = #""marker\(value)suffix"; "prefix\(value)marker"; "mark\(value)er"; "markers"; "marker\(value)marker""#
         let report = try scan(source, match: #"{"kind":"stringLiteral","text":"marker"}"#)
-        #expect(report.violations.map(\.column) == [1, 25, 78])
+        #expect(report.violations.map(\.column) == [2, 40, 79])
     }
 
     @Test(arguments: ["prefix", "suffix"])
