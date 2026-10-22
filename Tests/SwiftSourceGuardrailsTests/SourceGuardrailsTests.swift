@@ -4,9 +4,9 @@ import Testing
 
 struct SourceGuardrailsTests {
     static let config = """
-    {"version":1,"rules":[
-      {"id":"no-delay","tokens":["Task",".","sleep"],"paths":["Sources","Tests"]},
-      {"id":"injected-clock","tokens":["ContinuousClock","(",")"],"paths":["Tests"]}
+    {"version":2,"rules":[
+      {"id":"no-delay","match":{"kind":"tokens","tokens":["Task",".","sleep"]},"paths":["Sources","Tests"]},
+      {"id":"injected-clock","match":{"kind":"tokens","tokens":["ContinuousClock","(",")"]},"paths":["Tests"]}
     ],"allowlist":[]}
     """
 
@@ -120,7 +120,7 @@ struct SourceGuardrailsTests {
 
     @Test(arguments: [
         "{", "{}",
-        config.replacingOccurrences(of: "\"version\":1", with: "\"version\":2"),
+        config.replacingOccurrences(of: "\"version\":2", with: "\"version\":99"),
         config.replacingOccurrences(of: "\"allowlist\":[]", with: "\"allowlist\":[],\"allowList\":[]"),
         config.replacingOccurrences(of: "\"no-delay\"", with: "\"\""),
         config.replacingOccurrences(of: "\"Task\",\".\",\"sleep\"", with: "\"Task" + ".sleep\""),

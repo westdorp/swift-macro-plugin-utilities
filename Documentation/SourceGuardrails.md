@@ -13,63 +13,22 @@ swift run swift-source-guardrails --config guardrails.json --root . > guardrails
 are filesystem paths relative to the working directory when not absolute.
 `--help` describes the arguments. A compiled executable can be run directly.
 
-## Configuration version 1
-
-All fields shown below are required. Unknown fields, unsupported versions, wrong
-JSON types and invalid values are input errors. Paths use `/`, are relative to
-`--root`, and name a directory or a single `.swift` file. Absolute paths, empty
-components, `.`, `..`, backslashes and control characters are rejected. Paths
-are literal: no glob, regular expression or exclusion syntax is supported.
-
-```json
-{
-  "version": 1,
-  "rules": [
-    {
-      "id": "no-task-sleep",
-      "tokens": ["Task", ".", "sleep"],
-      "paths": ["Sources", "Tests"]
-    },
-    {
-      "id": "inject-test-clock",
-      "tokens": ["ContinuousClock", "(", ")"],
-      "paths": ["Tests"]
-    }
-  ],
-  "allowlist": [
-    {
-      "rule": "inject-test-clock",
-      "file": "Tests/AdapterTests.swift",
-      "reason": "Production clock adapter wiring fixture",
-      "expectedCount": 1
-    }
-  ]
-}
-```
-
-`rules` must be nonempty. Every rule has a unique, nonblank `id`, a nonempty
-`tokens` array and nonempty `paths`. Each token string must be one Swift code token
-without surrounding trivia. String-literal and regex-literal token kinds are
-rejected, including their delimiters and contents. For example, `Task.sleep` is three tokens and must
-be written as `["Task", ".", "sleep"]`. Tokens match consecutively in code,
-ignoring whitespace and comments. Identifier backticks are normalized. Longer
-identifiers such as `OtherTask` or `sleeper` do not match those token strings.
-Multiple rules can report the same location. Overlapping scopes scan each file
-once. A directory covers descendants at component boundaries: `Tests` does not
-cover `TestsOther`.
-
-`allowlist` is required and may be empty. An entry names an existing rule and a
-`.swift` file within that rule's scope, a nonblank `reason`, and a positive
-integer `expectedCount`. A `(rule, file)` pair may appear only once. The count is
-the number of token-sequence starts in that file, including overlapping matches.
-Only an exact count suppresses those matches. Too few, too many, a removed file
-or a now-unused allowance fails the check. Other files remain subject to the
-rule. A count mismatch reports the actual count and leaves matches visible.
-
 ## Configuration version 2
 
-Version 1 remains supported with identical matching and output. Version 2 uses
-tagged `match` objects and can share literal path lists through named scope sets:
+Only configuration version `2` is supported. Other versions are input errors
+with exit `2` and a diagnostic naming the supported version. `version`, `rules`
+and `allowlist` are required. Unknown fields, wrong JSON types and invalid values
+are input errors.
+
+Paths use `/`, are relative to `--root`, and name a directory or a single `.swift`
+file. Absolute paths, empty components, `.`, `..`, backslashes and control
+characters are rejected. Paths are literal: no glob, regular expression or
+exclusion syntax is supported. A directory covers descendants at component
+boundaries: `Tests` does not cover `TestsOther`. Overlapping scopes scan each
+file once.
+
+Rules use tagged `match` objects and can share path lists through named scope
+sets:
 
 ```json
 {
@@ -87,14 +46,36 @@ tagged `match` objects and can share literal path lists through named scope sets
 }
 ```
 
-Every rule requires `id`, `match`, and exactly one of `paths` or `scope`.
+`rules` must be nonempty. Every rule requires a unique, nonblank `id`, `match`,
+and exactly one of nonempty `paths` or a named `scope`.
 `scopes` is optional; each named set has a nonblank name and nonempty path list.
 Scope references must exist. Rules resolve their scope before normal recursive
 file discovery, so a new file under `Sources` is automatically covered. Unused
-sets are validated as paths but are not discovered. Existing path and allowance
-validation applies unchanged. Unknown fields and incompatible fields fail closed.
+sets are validated as paths but are not discovered. Unknown fields and
+incompatible fields fail closed.
 
-`{"kind":"tokens","tokens":["Task",".","sleep"]}` retains v1 token semantics.
+`allowlist` may be empty. An entry names an existing rule and a `.swift` file
+within that rule's scope, a nonblank `reason`, and a positive integer
+`expectedCount`. A `(rule, file)` pair may appear only once. For example:
+
+```json
+{"rule":"clock-names", "file":"Sources/ClockAdapter.swift",
+ "reason":"Production clock adapter wiring", "expectedCount":1}
+```
+
+Only an exact count suppresses the rule's matches in that file. Too few, too many,
+a removed file or a now-unused allowance fails the check. Other files remain
+subject to the rule. A count mismatch reports the actual count and leaves
+matches visible. Multiple rules can report the same location.
+
+`{"kind":"tokens","tokens":["Task",".","sleep"]}` requires a nonempty array
+of Swift code tokens without surrounding trivia. String-literal and regex-literal
+token kinds are rejected, including their delimiters and contents. `Task.sleep`
+is three tokens and must be written as `["Task", ".", "sleep"]`. Tokens match
+consecutively in code, ignoring whitespace and comments. Identifier backticks
+are normalized. Longer identifiers such as `OtherTask` or `sleeper` do not match
+those token strings. Overlapping token-sequence starts count separately.
+
 `identifier` requires `target` (`token` or `function`) and a `pattern` with
 `kind` (`prefix` or `suffix`) and `text` (one Swift identifier). These compare
 literal identifier spelling, including identifiers equal to `text`, normalizing
@@ -108,11 +89,6 @@ actual following Unicode uppercase letter: `testFoo` matches, while `test`,
 `testing`, `test1` and `test_Value` do not. Omitting the option or setting it to
 `false` preserves ordinary prefix matching. The option is invalid for suffix
 patterns, including when set to `false`.
-
-To migrate a v1 rule, move its `tokens` array into a `match` object of kind
-`tokens`, keep `id` and `paths`, and change the configuration version to `2`.
-Then replace repeated `paths` arrays with a named `scope` where useful.
-The allowlist and output schema do not change.
 
 For example, the following complete configuration checks generated strings and
 Network imports in every Swift file under `Sources`, including newly added
@@ -213,7 +189,7 @@ must satisfy the named literal validator (`positiveIntegerLiteral` or
 values fail once at the outer call, as do zero, signed and overflowing integers.
 Nested-call validation also works with a named outer `label`. Only this one
 level of nesting is supported; the inner validator must be a literal validator.
-Existing string-valued validators keep their behavior.
+String-valued validators check the selected argument directly.
 
 ### Imports, file conditions and required attributes
 
@@ -251,13 +227,13 @@ declaration/condition exists. A Foundation-only policy uses
 `module: {"kind":"except","name":"Foundation"}` with `form: "declaration"`;
 an all-module condition ban uses `module: {"kind":"any"}` with `form: "canImport"`.
 
-Any v2 rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
+Any rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
 applies only to files containing an import declaration of that module, including
 scoped/attributed imports and imports in inactive branches. The typed form
 `"when": {"imports":{"prefix":"NIO"}}` instead selects files importing any
 module whose first component starts with `NIO`, such as `NIO`, `NIOCore` or
 `NIOHTTP1`. The prefix must be one Swift name; comparison is case sensitive,
-with no glob or regex syntax. The existing string form remains exact.
+with no glob or regex syntax. The string form matches the module name exactly.
 A `canImport` condition alone does not satisfy this file condition. Files are still parsed and malformed
 Swift still fails closed when a rule's condition is false.
 
@@ -287,8 +263,8 @@ SwiftParser for their represented value, resolving escapes and multiline
 indentation. It never joins across an `ExpressionSegmentSyntax` interpolation.
 `text` compares each interpolation-free group on its own and requires equality
 with a complete decoded group; for example, `"marker\(value)suffix"` matches
-`text: "marker"`. `tokens` parses each decoded group with SwiftParser and uses the same code-token matcher as v1,
-ignoring embedded Swift comments, strings and regexes. Content can be an
+`text: "marker"`. `tokens` parses each decoded group with SwiftParser and matches
+code tokens, ignoring embedded Swift comments, strings and regexes. Content can be an
 incomplete Swift fragment; it need not compile or form a complete syntax tree.
 No regular expression is applied to source or literal content.
 
@@ -322,11 +298,6 @@ literals supply no reason. A marker after the construct does not satisfy it.
 The first match without an earlier marker reports once at its segment start.
 The option works with both `text` and `tokens`; exact `text` still matches a
 complete interpolation-free group.
-
-Migration from 0.5.0: v2 string rules previously reported at the literal's opening
-delimiter. Existing `text` and `tokens` rules now use the matched segment anchor
-described above, which can change line/column diagnostics. Matching and allowance
-counts are unchanged. V1 matching and locations are unchanged.
 
 ## Swift classification and limits
 

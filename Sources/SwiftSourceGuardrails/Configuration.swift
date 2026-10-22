@@ -67,23 +67,6 @@ struct GuardrailConfiguration: Decodable {
         func applies(to file: RelativePath) -> Bool { paths.contains { $0.contains(file) } }
     }
 
-    private struct LegacyRule: Decodable {
-        let rule: Rule
-        enum CodingKeys: String, CodingKey, CaseIterable { case id, tokens, paths }
-
-        init(from decoder: any Decoder) throws {
-            try decoder.rejectUnknownKeys(CodingKeys.self)
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            let id = try values.decode(String.self, forKey: .id)
-            let tokens = try values.decode([CodeToken].self, forKey: .tokens)
-            let paths = try values.decode([RelativePath].self, forKey: .paths)
-            guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                !tokens.isEmpty, !paths.isEmpty
-            else { throw GuardrailInputError("Rule id, tokens and paths must be nonempty") }
-            rule = Rule(id: id, matcher: .tokens(tokens), paths: paths)
-        }
-    }
-
     private struct RuleDocument: Decodable {
         enum Scope {
             case paths([RelativePath])
@@ -154,26 +137,21 @@ struct GuardrailConfiguration: Decodable {
     let allowlist: [Allowance]
 
     enum CodingKeys: String, CodingKey, CaseIterable { case version, rules, allowlist, scopes }
-    private enum LegacyKeys: String, CodingKey, CaseIterable { case version, rules, allowlist }
 
     init(from decoder: any Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let version = try values.decode(Int.self, forKey: .version)
-        switch version {
-        case 1:
-            try decoder.rejectUnknownKeys(LegacyKeys.self)
-            rules = try values.decode([LegacyRule].self, forKey: .rules).map(\.rule)
-        case 2:
-            let scopes = values.contains(.scopes) ? try values.decode([String: [RelativePath]].self, forKey: .scopes) : [:]
-            for (name, paths) in scopes {
-                guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !paths.isEmpty else {
-                    throw GuardrailInputError("Scope sets need nonblank names and nonempty paths")
-                }
-            }
-            rules = try values.decode([RuleDocument].self, forKey: .rules).map { try $0.resolved(scopes: scopes) }
-        default: throw GuardrailInputError("Supported configuration versions are 1 and 2; got \(version)")
+        guard version == 2 else {
+            throw GuardrailInputError("Supported configuration version is 2; got \(version)")
         }
+        let scopes = values.contains(.scopes) ? try values.decode([String: [RelativePath]].self, forKey: .scopes) : [:]
+        for (name, paths) in scopes {
+            guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !paths.isEmpty else {
+                throw GuardrailInputError("Scope sets need nonblank names and nonempty paths")
+            }
+        }
+        rules = try values.decode([RuleDocument].self, forKey: .rules).map { try $0.resolved(scopes: scopes) }
         allowlist = try values.decode([Allowance].self, forKey: .allowlist)
         guard !rules.isEmpty, Set(rules.map(\.id)).count == rules.count else {
             throw GuardrailInputError("Configuration needs nonempty rules with unique ids")

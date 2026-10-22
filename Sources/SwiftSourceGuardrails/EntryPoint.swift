@@ -8,7 +8,7 @@ struct SwiftSourceGuardrails: ParsableCommand {
         abstract: "Check Swift syntax against repository-owned policies and counted exceptions."
     )
 
-    @Option(help: "Path to a version 1 or 2 JSON guardrail configuration.")
+    @Option(help: "Path to a version 2 JSON guardrail configuration.")
     var config: String
 
     @Option(help: "Source root; rule paths are relative to this directory.")

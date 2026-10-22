@@ -4,22 +4,15 @@ import Testing
 
 struct Version2Tests {
     @Test(arguments: ["literals", "boundaries", "conditional-compilation", "conditional-conditions", "v2-calls", "v2-imports", "v2-strings"])
-    func tokenMigrationPreservesCompleteReports(name: String) throws {
-        var migrated = try #require(JSONSerialization.jsonObject(with: Data(SourceGuardrailsTests.config.utf8)) as? [String: Any])
-        migrated["version"] = 2
-        let rules = try #require(migrated["rules"] as? [[String: Any]])
-        migrated["rules"] = try rules.map { original in
-            var rule = original
-            let tokens = try #require(rule.removeValue(forKey: "tokens") as? [String])
-            rule["match"] = ["kind": "tokens", "tokens": tokens]
-            return rule
-        }
+    func tokenRulesProduceCompleteExpectedReports(name: String) throws {
         let source = try GuardrailSource(file: RelativePath("Tests/File.swift"), text: fixture(name))
-        let v1 = try SourceGuardrails.scan(configuration: GuardrailConfiguration.decode(Data(SourceGuardrailsTests.config.utf8)), files: [source])
-        let v2 = try SourceGuardrails.scan(configuration: GuardrailConfiguration.decode(JSONSerialization.data(withJSONObject: migrated)), files: [source])
+        let configuration = try GuardrailConfiguration.decode(Data(SourceGuardrailsTests.config.utf8))
+        let report = try SourceGuardrails.scan(configuration: configuration, files: [source])
+        let expectedURL = try #require(Bundle.module.url(forResource: name, withExtension: "report.json", subdirectory: "Fixtures"))
+        let expected = try Data(contentsOf: expectedURL)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        #expect(try encoder.encode(v1) == encoder.encode(v2))
+        #expect(try encoder.encode(report) == expected)
     }
 
     @Test(arguments: [
@@ -519,7 +512,7 @@ struct Version2Tests {
         #expect(try scan("func other() {}", match: match).exitCode == 0)
     }
 
-    @Test func version2TokensKeepVersion1Classification() throws {
+    @Test func tokensMatchOnlyCode() throws {
         let source = "Task" + ".sleep()\nlet text = \"Task" + ".sleep()\""
         let match = #"{"kind":"tokens","tokens":["Task",".","sleep"]}"#
         #expect(try scan(source, match: match).violations.map(\.line) == [1])

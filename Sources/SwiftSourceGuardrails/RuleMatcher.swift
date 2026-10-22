@@ -27,13 +27,6 @@ struct RuleMatcher {
         }
         self.condition = condition
     }
-
-    private init(check: Check, condition: FileCondition?) {
-        self.check = check
-        self.condition = condition
-    }
-
-    static func tokens(_ tokens: [CodeToken]) -> Self { Self(check: .occurrences(.tokens(tokens), nil), condition: nil) }
 }
 
 enum OccurrenceMatcher: Decodable {

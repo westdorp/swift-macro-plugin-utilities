@@ -1,0 +1,1 @@
+{"allowlistChecks":[],"errors":[],"scannedFiles":1,"schemaVersion":1,"violations":[{"column":1,"file":"Tests\/File.swift","line":5,"rule":"no-delay"},{"column":1,"file":"Tests\/File.swift","line":7,"rule":"no-delay"},{"column":1,"file":"Tests\/File.swift","line":8,"rule":"injected-clock"}]}
