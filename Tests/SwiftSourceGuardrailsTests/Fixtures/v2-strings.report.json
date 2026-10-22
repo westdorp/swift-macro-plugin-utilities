@@ -1,0 +1,1 @@
+{"allowlistChecks":[],"errors":[],"scannedFiles":1,"schemaVersion":1,"violations":[{"column":41,"file":"Tests\/File.swift","line":10,"rule":"no-delay"}]}

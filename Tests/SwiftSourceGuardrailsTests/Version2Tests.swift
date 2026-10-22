@@ -3,6 +3,18 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct Version2Tests {
+    @Test(arguments: ["literals", "boundaries", "conditional-compilation", "conditional-conditions", "v2-calls", "v2-imports", "v2-strings"])
+    func tokenRulesProduceCompleteExpectedReports(name: String) throws {
+        let source = try GuardrailSource(file: RelativePath("Tests/File.swift"), text: fixture(name))
+        let configuration = try GuardrailConfiguration.decode(Data(SourceGuardrailsTests.config.utf8))
+        let report = try SourceGuardrails.scan(configuration: configuration, files: [source])
+        let expectedURL = try #require(Bundle.module.url(forResource: name, withExtension: "report.json", subdirectory: "Fixtures"))
+        let expected = try Data(contentsOf: expectedURL)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        #expect(try encoder.encode(report) == expected)
+    }
+
     @Test(arguments: [
         (#""Unsafe: documented; unsafe()""#, true),
         (#""Unchecked: documented; unsafe()""#, true),

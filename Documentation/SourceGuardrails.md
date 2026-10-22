@@ -189,7 +189,7 @@ must satisfy the named literal validator (`positiveIntegerLiteral` or
 values fail once at the outer call, as do zero, signed and overflowing integers.
 Nested-call validation also works with a named outer `label`. Only this one
 level of nesting is supported; the inner validator must be a literal validator.
-Existing string-valued validators keep their behavior.
+String-valued validators check the selected argument directly.
 
 ### Imports, file conditions and required attributes
 
@@ -227,13 +227,13 @@ declaration/condition exists. A Foundation-only policy uses
 `module: {"kind":"except","name":"Foundation"}` with `form: "declaration"`;
 an all-module condition ban uses `module: {"kind":"any"}` with `form: "canImport"`.
 
-Any v2 rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
+Any rule may add `"when": {"imports":"Foundation"}` beside `match`. It then
 applies only to files containing an import declaration of that module, including
 scoped/attributed imports and imports in inactive branches. The typed form
 `"when": {"imports":{"prefix":"NIO"}}` instead selects files importing any
 module whose first component starts with `NIO`, such as `NIO`, `NIOCore` or
 `NIOHTTP1`. The prefix must be one Swift name; comparison is case sensitive,
-with no glob or regex syntax. The existing string form remains exact.
+with no glob or regex syntax. The string form matches the module name exactly.
 A `canImport` condition alone does not satisfy this file condition. Files are still parsed and malformed
 Swift still fails closed when a rule's condition is false.
 
