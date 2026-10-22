@@ -3,6 +3,30 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct GuardrailCommandTests {
+    @Test func version1ConfigurationIsRejectedWithExitTwo() throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        try fixture.write("guardrails.json", #"{"version":1,"rules":[{"id":"old","tokens":["forbidden"],"paths":["Sources"]}],"allowlist":[]}"#)
+        try fixture.write("Sources/File.swift", "let ordinary = 0")
+        let command = try SwiftSourceGuardrails.parse(["--config", fixture.config.path, "--root", fixture.root.path])
+        var output = Data()
+        var summary = Data()
+        do {
+            try command.run(writeOutput: { output.append($0) }, writeError: { summary.append($0) })
+            Issue.record("Version 1 configuration must fail the command")
+        } catch {
+            #expect(SwiftSourceGuardrails.exitCode(for: error).rawValue == 2)
+        }
+        let report = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+        let errors = try #require(report["errors"] as? [String])
+        #expect(errors.count == 1)
+        #expect(errors.first?.contains("Supported configuration version is 2; got 1") == true)
+        #expect(report["scannedFiles"] as? Int == 0)
+        #expect((report["violations"] as? [[String: Any]])?.isEmpty == true)
+        #expect((report["allowlistChecks"] as? [[String: Any]])?.isEmpty == true)
+        #expect(String(decoding: summary, as: UTF8.self).contains("failed"))
+    }
+
     @Test func version21CapabilitiesComposeThroughTheCommand() throws {
         let fixture = try CommandFixture()
         defer { fixture.remove() }
@@ -233,6 +257,7 @@ struct GuardrailCommandTests {
         #expect(explicit.config == "policy.json")
         #expect(explicit.root == "repository")
         #expect(SwiftSourceGuardrails.helpMessage().contains("--config"))
+        #expect(SwiftSourceGuardrails.helpMessage().contains("version 2 JSON"))
     }
 
     @Test func scansOverlappingScopesOnceAndRendersJSON() throws {
