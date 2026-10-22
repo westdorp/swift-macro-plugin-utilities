@@ -41,16 +41,16 @@ enum OccurrenceMatcher: Decodable {
     case identifier(IdentifierPattern, IdentifierTarget)
     case call(SyntaxName)
     case member(SyntaxName)
-    case argument(SyntaxName, SwiftName, ArgumentValidation)
+    case argument(SyntaxName, ArgumentSelection, ArgumentValidation)
     case `import`(ImportPattern)
     case stringLiteral(StringContentPattern)
 
     private enum Kind: String, Decodable { case tokens, identifier, call, member, argument, stringLiteral }
-    private enum Keys: String, CodingKey { case kind, tokens, pattern, target, name, call, label, validation }
+    private enum Keys: String, CodingKey { case kind, tokens, pattern, target, name, call, label, position, validation }
     private enum TokenKeys: String, CodingKey, CaseIterable { case kind, tokens }
     private enum IdentifierKeys: String, CodingKey, CaseIterable { case kind, pattern, target }
     private enum NameKeys: String, CodingKey, CaseIterable { case kind, name }
-    private enum ArgumentKeys: String, CodingKey, CaseIterable { case kind, call, label, validation }
+    private enum ArgumentKeys: String, CodingKey, CaseIterable { case kind, call, label, position, validation }
 
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: Keys.self)
@@ -76,7 +76,7 @@ enum OccurrenceMatcher: Decodable {
             try decoder.rejectUnknownKeys(ArgumentKeys.self)
             self = .argument(
                 try values.decode(SyntaxName.self, forKey: .call),
-                try values.decode(SwiftName.self, forKey: .label),
+                try ArgumentSelection(from: decoder),
                 try values.decode(ArgumentValidation.self, forKey: .validation)
             )
         case .stringLiteral:
@@ -254,7 +254,48 @@ struct SyntaxName: Decodable {
     }
 }
 
-enum ArgumentValidation: String, Decodable { case positiveIntegerLiteral, nonemptyStringLiteral }
+enum ArgumentSelection: Decodable {
+    case named(SwiftName)
+    case position(Int)
+
+    private enum CodingKeys: String, CodingKey { case label, position }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch (values.contains(.label), values.contains(.position)) {
+        case (true, false): self = .named(try values.decode(SwiftName.self, forKey: .label))
+        case (false, true):
+            let position = try values.decode(Int.self, forKey: .position)
+            guard position >= 0 else { throw GuardrailInputError("Argument position must be nonnegative") }
+            self = .position(position)
+        default: throw GuardrailInputError("Argument matcher needs exactly one of label or position")
+        }
+    }
+}
+
+enum LiteralArgumentValidation: String, Decodable { case positiveIntegerLiteral, nonemptyStringLiteral }
+
+enum ArgumentValidation: Decodable {
+    case literal(LiteralArgumentValidation)
+    case call(SyntaxName, LiteralArgumentValidation)
+
+    private enum Kind: String, Decodable { case call }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case kind, name, validation }
+
+    init(from decoder: any Decoder) throws {
+        if let _ = try? decoder.singleValueContainer().decode(String.self) {
+            self = .literal(try LiteralArgumentValidation(from: decoder))
+        } else {
+            try decoder.rejectUnknownKeys(CodingKeys.self)
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            _ = try values.decode(Kind.self, forKey: .kind)
+            self = .call(
+                try values.decode(SyntaxName.self, forKey: .name),
+                try values.decode(LiteralArgumentValidation.self, forKey: .validation)
+            )
+        }
+    }
+}
 
 struct LexicalContext: Decodable {
     enum Relation: String, Decodable { case inside, outside }

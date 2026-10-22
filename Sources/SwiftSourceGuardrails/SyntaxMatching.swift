@@ -42,11 +42,9 @@ private extension OccurrenceMatcher {
         case .member(let name):
             guard let member = syntax.as(MemberAccessExprSyntax.self), name.matches(ExprSyntax(member)) else { return nil }
             return member.firstToken(viewMode: .sourceAccurate)
-        case .argument(let name, let label, let validation):
+        case .argument(let name, let selection, let validation):
             guard let call = syntax.as(FunctionCallExprSyntax.self), name.matches(call.calledExpression) else { return nil }
-            let arguments = call.arguments.filter { $0.label?.guardrailText == label.text }.map(\.expression)
-                + call.additionalTrailingClosures.filter { $0.label.guardrailText == label.text }.map { ExprSyntax($0.closure) }
-            if arguments.count == 1, let argument = arguments.first, validation.accepts(argument) { return nil }
+            if let argument = selection.argument(in: call), validation.accepts(argument) { return nil }
             return call.calledExpression.firstToken(viewMode: .sourceAccurate)
         case .import(let pattern):
             return pattern.match(syntax)
@@ -187,7 +185,35 @@ extension SyntaxName {
     }
 }
 
+private extension ArgumentSelection {
+    func argument(in call: FunctionCallExprSyntax) -> ExprSyntax? {
+        switch self {
+        case .named(let label):
+            let arguments = call.arguments.filter { $0.label?.guardrailText == label.text }.map(\.expression)
+                + call.additionalTrailingClosures.filter { $0.label.guardrailText == label.text }.map { ExprSyntax($0.closure) }
+            return arguments.count == 1 ? arguments.first : nil
+        case .position(let position):
+            guard let argument = call.arguments.dropFirst(position).first, argument.label == nil else { return nil }
+            return argument.expression
+        }
+    }
+}
+
 private extension ArgumentValidation {
+    func accepts(_ expression: ExprSyntax) -> Bool {
+        switch self {
+        case .literal(let validation): return validation.accepts(expression)
+        case .call(let name, let validation):
+            guard let call = expression.as(FunctionCallExprSyntax.self), name.matches(call.calledExpression),
+                call.arguments.count == 1, let argument = call.arguments.first,
+                argument.label == nil, call.trailingClosure == nil
+            else { return false }
+            return validation.accepts(argument.expression)
+        }
+    }
+}
+
+private extension LiteralArgumentValidation {
     func accepts(_ expression: ExprSyntax) -> Bool {
         switch self {
         case .positiveIntegerLiteral:

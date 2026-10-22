@@ -356,6 +356,58 @@ struct Version2Tests {
     }
 
     @Test(arguments: ["1", "0x10", "0b10", "0o10", "1_000"])
+    func nestedPositiveIntegerArgumentsPass(value: String) throws {
+        let source = """
+        .timeLimit(
+            .minutes(
+                \(value)
+            )
+        )
+        """
+        #expect(try scan(source, match: nestedTimeLimitMatch).violations.isEmpty)
+    }
+
+    @Test(arguments: [
+        ".minutes(0)", ".minutes(-1)", ".minutes(+1)", ".minutes(1.5)",
+        ".minutes((1))", ".minutes(1 + 2)", ".minutes(value)",
+        ".minutes(999999999999999999999999999999)", ".minutes()",
+        ".minutes(1, 2)", ".minutes(value: 1)", ".minutes { 1 }",
+        ".minutes(1) {}", ".seconds(1)", "Duration.minutes(1)",
+        "(.minutes(1))", #"".minutes(1)""#, "value"
+    ])
+    func nestedInvalidArgumentValuesFail(value: String) throws {
+        let source = ".timeLimit(\n\(value)\n)"
+        #expect(try scan(source, match: nestedTimeLimitMatch).violations.map(\.line) == [1])
+    }
+
+    @Test func positionalArgumentsRequireAnUnlabeledValue() throws {
+        let source = """
+        let a = .timeLimit()
+        let b = .timeLimit(limit: .minutes(1))
+        let c = .timeLimit { .minutes(1) }
+        let d = .other(.minutes(0))
+        let e = .timeLimit(.minutes(1))
+        let f = .timeLimit(.`minutes`(1))
+        """
+        #expect(try scan(source, match: nestedTimeLimitMatch).violations.map(\.line) == [1, 2, 3])
+        let second = #"{"kind":"argument","call":["schedule"],"position":1,"validation":"positiveIntegerLiteral"}"#
+        #expect(try scan("schedule(work, 1)\nschedule(work)\nschedule(work, minutes: 1)", match: second).violations.map(\.line) == [2, 3])
+    }
+
+    @Test func namedArgumentsCanValidateNestedCalls() throws {
+        let match = #"{"kind":"argument","call":["schedule"],"label":"limit","validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral"}}"#
+        #expect(try scan("schedule(limit: .minutes(1))", match: match).violations.isEmpty)
+        #expect(try scan("schedule(limit: .minutes(0))\nschedule(limit: .minutes(1), limit: .minutes(2))", match: match).violations.map(\.line) == [1, 2])
+        let reason = #"{"kind":"argument","call":["schedule"],"position":0,"validation":{"kind":"call","name":["reason"],"validation":"nonemptyStringLiteral"}}"#
+        #expect(try scan(#"schedule(.reason("valid"))"#, match: reason).violations.isEmpty)
+        #expect(try scan(#"schedule(.reason(" "))"#, match: reason).violations.count == 1)
+    }
+
+    private var nestedTimeLimitMatch: String {
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral"}}"#
+    }
+
+    @Test(arguments: ["1", "0x10", "0b10", "0o10", "1_000"])
     func positiveNamedIntegerLiteralsPass(value: String) throws {
         let source = """
         schedule<Result<Int, Error>>(

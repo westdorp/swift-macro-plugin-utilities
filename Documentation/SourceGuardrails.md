@@ -193,6 +193,28 @@ parentheses, variables, floats, zero and overflow fail. `nonemptyStringLiteral`
 requires a noninterpolated string literal with a nonblank decoded value, suitable
 for a named `reason` argument. Neither validator evaluates expressions.
 
+For an unlabeled parenthesized argument, replace `label` with a zero-based,
+nonnegative integer `position`. The selected argument must exist and be
+unlabeled. Other arguments are allowed. Specify exactly one of `label` and
+`position`; neither form evaluates expressions.
+
+A typed nested-call validator checks `.timeLimit(.minutes(N))`:
+
+```json
+{"kind":"argument", "call":["timeLimit"], "position":0,
+ "validation":{"kind":"call", "name":["minutes"],
+               "validation":"positiveIntegerLiteral"}}
+```
+
+The selected value must itself be a call to the exact syntax name with exactly
+one unlabeled parenthesized argument and no trailing closure. That inner argument
+must satisfy the named literal validator (`positiveIntegerLiteral` or
+`nonemptyStringLiteral`). Missing, extra, labeled, computed and wrong-callee
+values fail once at the outer call, as do zero, signed and overflowing integers.
+Nested-call validation also works with a named outer `label`. Only this one
+level of nesting is supported; the inner validator must be a literal validator.
+Existing string-valued validators keep their behavior.
+
 ### Imports, file conditions and required attributes
 
 ```json

@@ -3,6 +3,59 @@ import Testing
 @testable import SwiftSourceGuardrails
 
 struct GuardrailCommandTests {
+    @Test func version21CapabilitiesComposeThroughTheCommand() throws {
+        let fixture = try CommandFixture()
+        defer { fixture.remove() }
+        try fixture.write("guardrails.json", #"""
+        {"version":2,"rules":[
+          {"id":"reason","paths":["Sources"],"match":{"kind":"stringLiteral","tokens":["unsafe","("],"reasonMarkers":["Unchecked:","Unsafe:"]}},
+          {"id":"test-name","paths":["Sources"],"match":{"kind":"identifier","target":"function","pattern":{"kind":"prefix","text":"test","nextIsUppercase":true}},"when":{"imports":{"prefix":"NIO"}}},
+          {"id":"limit","paths":["Sources"],"match":{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral"}}}
+        ],"allowlist":[]}
+        """#)
+        let invalid = #"""
+        import NIOCore
+        func
+        testExample() {}
+        let limit = .timeLimit(.minutes(0))
+        let generated = """
+            struct Ordinary {}
+            unsafe()
+            """
+        """#
+        let valid = #"""
+        import NIOHTTP1
+        func
+        testing() {}
+        let limit = .timeLimit(
+            .minutes(2)
+        )
+        let generated = """
+            // Unsafe: documented generation
+            struct Ordinary {}
+            unsafe()
+            """
+        """#
+        try fixture.write("Sources/Invalid.swift", invalid)
+        try fixture.write("Sources/Valid.swift", valid)
+        let command = try SwiftSourceGuardrails.parse(["--config", fixture.config.path, "--root", fixture.root.path])
+        var output = Data()
+        var summary = Data()
+        do {
+            try command.run(writeOutput: { output.append($0) }, writeError: { summary.append($0) })
+            Issue.record("Policy violations must fail the command")
+        } catch {
+            #expect(SwiftSourceGuardrails.exitCode(for: error).rawValue == 1)
+        }
+        let report = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+        #expect(report["scannedFiles"] as? Int == 2)
+        let violations = try #require(report["violations"] as? [[String: Any]])
+        #expect(violations.compactMap { $0["rule"] as? String } == ["test-name", "limit", "reason"])
+        #expect(violations.compactMap { $0["line"] as? Int } == [3, 4, 7])
+        #expect(violations.compactMap { $0["file"] as? String } == Array(repeating: "Sources/Invalid.swift", count: 3))
+        #expect(String(decoding: summary, as: UTF8.self).contains("3 violation(s)"))
+    }
+
     @Test func version2AcceptanceExamplesReachTheCommandOutput() throws {
         let fixture = try CommandFixture()
         defer { fixture.remove() }
@@ -39,6 +92,18 @@ struct GuardrailCommandTests {
         #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test","nextIsUppercase":null}}"#,
         #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test","nextIsUppercase":"true"}}"#,
         #"{"kind":"identifier","target":"token","pattern":{"kind":"prefix","text":"test","nextIsUppercase":1}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":-1,"validation":"positiveIntegerLiteral"}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":null,"validation":"positiveIntegerLiteral"}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":"0","validation":"positiveIntegerLiteral"}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"label":"limit","validation":"positiveIntegerLiteral"}"#,
+        #"{"kind":"argument","call":["timeLimit"],"validation":"positiveIntegerLiteral"}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":[],"validation":"positiveIntegerLiteral"}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":"unknown"}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral","extra":true}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"unknown","name":["minutes"],"validation":"positiveIntegerLiteral"}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":null}}"#,
+        #"{"kind":"argument","call":["timeLimit"],"position":0,"validation":{"kind":"call","name":["minutes"],"validation":{"kind":"call","name":["minutes"],"validation":"positiveIntegerLiteral"}}}"#,
         #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[]}"#,
         #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[""]}"#,
         #"{"kind":"stringLiteral","tokens":["unsafe"],"reasonMarkers":[" "]}"#,
