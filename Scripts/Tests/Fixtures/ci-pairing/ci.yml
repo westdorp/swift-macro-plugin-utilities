@@ -1,0 +1,17 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    name: Package Gate
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@pinned
+      - name: Select the committed Xcode
+        run: |
+          version="$(cat "$GITHUB_WORKSPACE/.xcode-version")"
+          developer_dir="/Applications/Xcode_$version.app/Contents/Developer"
+          test "$(DEVELOPER_DIR="$developer_dir" xcodebuild -version | sed -n 1p)" = "Xcode $version"
+          echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
+      - name: Test
+        run: make ci-test

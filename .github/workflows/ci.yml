@@ -24,4 +24,4 @@ jobs:
           echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
 
       - name: Test
-        run: make test
+        run: make ci-test
