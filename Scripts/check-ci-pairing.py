@@ -10,12 +10,6 @@ import sys
 import tomllib
 
 
-XCODE_SELECTION = '''version="$(cat "$GITHUB_WORKSPACE/.xcode-version")"
-developer_dir="/Applications/Xcode_$version.app/Contents/Developer"
-test "$(DEVELOPER_DIR="$developer_dir" xcodebuild -version | sed -n 1p)" = "Xcode $version"
-echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"'''
-
-
 class GateError(Exception):
     """The workflow or profile cannot be interpreted for pairing."""
 
@@ -28,28 +22,6 @@ def parse_workflow(source, run):
     if result.returncode:
         raise GateError(f"workflow YAML: {result.stderr.strip()}")
     return json.loads(result.stdout)
-
-
-def job_instances(job_id, job):
-    strategy = job.get("strategy", {})
-    if not isinstance(strategy, dict) or not isinstance(job.get("name", job_id), str):
-        raise GateError(f"{job_id}: strategy must be a mapping and name must be a string")
-    matrix = strategy.get("matrix")
-    if matrix is None:
-        return [(job_id, job.get("name", job_id))], f"make ci-{job_id}"
-    if not isinstance(matrix, dict) or len(matrix) != 1:
-        raise GateError(f"{job_id}: pairing requires a single literal matrix axis")
-    key, values = next(iter(matrix.items()))
-    if key in {"include", "exclude"} or not isinstance(values, list) or not values:
-        raise GateError(f"{job_id}: pairing requires a nonempty literal matrix axis")
-    if any(type(value) not in (str, int, float) for value in values):
-        raise GateError(f"{job_id}: matrix values must be strings or numbers")
-    expression = re.compile(r"\$\{\{\s*matrix\." + re.escape(key) + r"\s*\}\}")
-    instances = [
-        (f"{job_id}-{value}", expression.sub(str(value), job.get("name", f"{job_id} ({value})")))
-        for value in values
-    ]
-    return instances, f"make ci-{job_id}-${{{{ matrix.{key} }}}}"
 
 
 def required_step(step):
@@ -83,11 +55,18 @@ def violations(workflow, profile):
             continue
         if not any(label.startswith(("macos-", "xcode-")) for label in labels):
             continue
-        try:
-            instances, command = job_instances(job_id, job)
-        except GateError as error:
-            found.append(str(error))
+        strategy = job.get("strategy", {})
+        if isinstance(strategy, dict) and "matrix" in strategy:
+            found.append(
+                f"macOS job {job_id} uses a matrix; split it into one job per instance, "
+                "or extend this check when a real need appears"
+            )
             continue
+        check = job.get("name", job_id)
+        if not isinstance(strategy, dict) or not isinstance(check, str):
+            found.append(f"{job_id}: strategy must be a mapping and name must be a string")
+            continue
+        command = f"make ci-{job_id}"
         steps = job.get("steps")
         if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
             found.append(f"{job_id}: steps must be an array of mappings")
@@ -110,7 +89,6 @@ def violations(workflow, profile):
         checkouts = [i for i, step in enumerate(steps) if str(step.get("uses", "")).lower().startswith("actions/checkout@")]
         if len(checkouts) != 1:
             found.append(f"{job_id}: expected exactly one checkout")
-        selection_indices = set()
         if developer_dir is not None:
             pinned = re.fullmatch(r"/Applications/Xcode_([0-9]+(?:\.[0-9]+)+)\.app/Contents/Developer", str(developer_dir))
             if pinned:
@@ -119,39 +97,35 @@ def violations(workflow, profile):
                 found.append(f"{job_id}: explicit DEVELOPER_DIR must name a versioned Xcode application")
         for index in checkouts:
             selection = steps[index + 1] if index + 1 < len(steps) else {}
-            run = selection.get("run")
-            if (selection.get("name") == "Select the committed Xcode"
-                    and isinstance(run, str) and run.strip() == XCODE_SELECTION
-                    and required_step(selection)):
-                selection_indices.add(index + 1)
-            elif developer_dir is None:
+            if (any(label.startswith("macos-") for label in labels) or developer_dir is None) and not (
+                selection.get("uses") == "./.github/actions/select-xcode" and required_step(selection)
+            ):
                 found.append(f"{job_id}: select the committed Xcode immediately after checkout")
         commands = [
             step["run"].strip() if isinstance(step["run"], str) else step["run"]
-            for index, step in enumerate(steps) if "run" in step and index not in selection_indices
+            for step in steps if "run" in step
         ]
         if commands != [command]:
             found.append(f"{job_id}: expected exactly one run step {command!r}, got {commands!r}")
-        for slug, check in instances:
-            expected = [
-                {"id": slug, "kind": "local", "host": "aarch64-darwin", "level": "eval",
-                 "proves": ["aarch64-darwin"], "argv": ["xcode-test", *selector, "make", f"ci-{slug}"]},
-                {"id": f"{slug}-ci", "kind": "ci", "level": "build", "proves": ["aarch64-darwin"],
-                 "checks": [{"app": "github-actions", "name": check}]},
-            ]
-            for wanted in expected:
-                part_id = wanted["id"]
-                expected_ids.add(part_id)
-                matches = parts.get(part_id, [])
-                if len(matches) != 1:
-                    found.append(f"{part_id}: expected exactly one profile part, got {len(matches)}")
-                for part in matches:
-                    for field, value in wanted.items():
-                        if part.get(field) != value:
-                            found.append(f"{part_id} {field}: expected {value!r}, got {part.get(field)!r}")
-                    extra = part.keys() - wanted.keys()
-                    if extra:
-                        found.append(f"{part_id}: unexpected fields {', '.join(sorted(extra))}")
+        expected = [
+            {"id": job_id, "kind": "local", "host": "aarch64-darwin", "level": "eval",
+             "proves": ["aarch64-darwin"], "argv": ["xcode-test", *selector, "make", f"ci-{job_id}"]},
+            {"id": f"{job_id}-ci", "kind": "ci", "level": "build", "proves": ["aarch64-darwin"],
+             "checks": [{"app": "github-actions", "name": check}]},
+        ]
+        for wanted in expected:
+            part_id = wanted["id"]
+            expected_ids.add(part_id)
+            matches = parts.get(part_id, [])
+            if len(matches) != 1:
+                found.append(f"{part_id}: expected exactly one profile part, got {len(matches)}")
+            for part in matches:
+                for field, value in wanted.items():
+                    if part.get(field) != value:
+                        found.append(f"{part_id} {field}: expected {value!r}, got {part.get(field)!r}")
+                extra = part.keys() - wanted.keys()
+                if extra:
+                    found.append(f"{part_id}: unexpected fields {', '.join(sorted(extra))}")
     for part_id, matches in parts.items():
         for part in matches:
             argv = part.get("argv", [])

@@ -97,8 +97,24 @@ class PairingTests(unittest.TestCase):
         self.job["steps"][1:1] = [{"name": "Intervening action", "uses": "some/action@pin"}]
         self.assertIn("immediately after checkout", self.errors())
 
-    def test_a_selection_name_without_selection_commands_fails(self):
-        self.job["steps"][1]["run"] = "echo selected"
+    def test_missing_xcode_selection_action_fails(self):
+        del self.job["steps"][1]
+        self.assertIn("immediately after checkout", self.errors())
+
+    def test_xcode_selection_action_uses_must_match_exactly(self):
+        for uses in (None, "./.github/actions/select-xcode/", "./.github/actions/Select-Xcode", "other/select-xcode@pin"):
+            with self.subTest(uses=uses):
+                self.job["steps"][1]["uses"] = uses
+                self.assertIn("immediately after checkout", self.errors())
+
+    def test_xcode_selection_action_name_is_not_required(self):
+        del self.job["steps"][1]["name"]
+        self.assertEqual(self.errors(), "")
+
+    def test_macos_explicit_pin_does_not_replace_selection_action(self):
+        self.job["env"] = {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}
+        self.profile["parts"][0]["argv"][1:3] = ["--xcode", "27.1"]
+        del self.job["steps"][1]
         self.assertIn("immediately after checkout", self.errors())
 
     def test_extra_run_steps_cannot_hide_behind_selection_name(self):
@@ -176,45 +192,37 @@ class PairingTests(unittest.TestCase):
         self.profile["parts"][1]["checks"][0]["name"] = "test"
         self.assertEqual(self.errors(), "")
 
-    def test_literal_matrix_instances_have_separate_parts(self):
-        self.job["strategy"] = {"matrix": {"mode": ["debug", "release"]}}
-        self.job["name"] = "Package Gate (${{ matrix.mode }})"
-        self.job["steps"][-1]["run"] = "make ci-test-${{ matrix.mode }}"
-        self.profile["parts"] = []
-        for mode in ("debug", "release"):
-            local, ci = copy.deepcopy(type(self).profile["parts"])
-            local["id"] = f"test-{mode}"
-            local["argv"][-1] = f"ci-test-{mode}"
-            ci["id"] = f"test-{mode}-ci"
-            ci["checks"][0]["name"] = f"Package Gate ({mode})"
-            self.profile["parts"].extend([local, ci])
-        self.assertEqual(self.errors(), "")
-        self.profile["parts"].pop()
-        self.assertIn("test-release-ci: expected exactly one profile part", self.errors())
-
-    def test_unnamed_matrix_instances_use_job_id_and_value_as_check_names(self):
-        del self.job["name"]
-        self.job["strategy"] = {"matrix": {"mode": ["debug", "release"]}}
-        self.job["steps"][-1]["run"] = "make ci-test-${{ matrix.mode }}"
-        self.profile["parts"] = []
-        for mode in ("debug", "release"):
-            local, ci = copy.deepcopy(type(self).profile["parts"])
-            local["id"] = f"test-{mode}"
-            local["argv"][-1] = f"ci-test-{mode}"
-            ci["id"] = f"test-{mode}-ci"
-            ci["checks"][0]["name"] = f"test ({mode})"
-            self.profile["parts"].extend([local, ci])
-        self.assertEqual(self.errors(), "")
-        self.profile["parts"][1]["checks"][0]["name"] = "test"
-        self.assertIn("test-debug-ci checks", self.errors())
+    def test_macos_matrix_jobs_are_rejected_regardless_of_name_or_expression(self):
+        for named in (False, True):
+            for expression in (False, True):
+                with self.subTest(named=named, expression=expression):
+                    workflow = copy.deepcopy(self.workflow)
+                    job = workflow["jobs"]["test"]
+                    job["strategy"] = {"matrix": {"mode": ["debug", "release"]}}
+                    if named:
+                        job["name"] = "Package Gate (${{ matrix.mode }})" if expression else "Package Gate"
+                    else:
+                        del job["name"]
+                    if expression:
+                        job["steps"][-1]["run"] = "make ci-test-${{ matrix.mode }}"
+                    self.assertIn(
+                        "macOS job test uses a matrix; split it into one job per instance, "
+                        "or extend this check when a real need appears",
+                        gate.violations(workflow, self.profile),
+                    )
 
     def test_unsupported_matrix_shapes_fail_instead_of_skipping_instances(self):
-        for matrix in ("${{ fromJSON(needs.plan.outputs.matrix) }}", {}, {"mode": []}, {"include": [{}]}, {"a": [1], "b": [2]}):
+        for matrix in (None, "${{ fromJSON(needs.plan.outputs.matrix) }}", {}, {"mode": []}, {"include": [{}]}, {"a": [1], "b": [2]}):
             with self.subTest(matrix=matrix):
                 self.job["strategy"] = {"matrix": matrix}
-                self.assertTrue(self.errors())
+                self.assertIn(
+                    "macOS job test uses a matrix; split it into one job per instance, "
+                    "or extend this check when a real need appears",
+                    gate.violations(self.workflow, self.profile),
+                )
 
     def test_explicit_second_xcode_uses_its_version(self):
+        self.job["runs-on"] = "xcode-27.1"
         del self.job["steps"][1]
         self.job["env"] = {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}
         self.profile["parts"][0]["argv"][1:3] = ["--xcode", "27.1"]
