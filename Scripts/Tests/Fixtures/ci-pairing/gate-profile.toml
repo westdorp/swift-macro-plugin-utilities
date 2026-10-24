@@ -1,0 +1,17 @@
+version = 2
+platforms = ["aarch64-darwin"]
+
+[[parts]]
+id = "test"
+kind = "local"
+host = "aarch64-darwin"
+level = "eval"
+proves = ["aarch64-darwin"]
+argv = ["xcode-test", "--xcode-version-file", ".xcode-version", "make", "ci-test"]
+
+[[parts]]
+id = "test-ci"
+kind = "ci"
+level = "build"
+proves = ["aarch64-darwin"]
+checks = [{ app = "github-actions", name = "Package Gate" }]

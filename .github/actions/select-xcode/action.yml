@@ -1,0 +1,14 @@
+name: Select Xcode
+description: Select the Xcode version committed in .xcode-version.
+runs:
+  using: composite
+  steps:
+    # The Xcode .xcode-version names, never the runner image default, which GitHub moves.
+    - name: Select the committed Xcode
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        version="$(cat "$GITHUB_WORKSPACE/.xcode-version")"
+        developer_dir="/Applications/Xcode_$version.app/Contents/Developer"
+        test "$(DEVELOPER_DIR="$developer_dir" xcodebuild -version | sed -n 1p)" = "Xcode $version"
+        echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"

@@ -79,11 +79,16 @@ changes.
 
 ## Development
 
-Run the complete package gate with:
+Before pushing, run `preflight run-gates --part <id>` for each local part in
+[`gate-profile.toml`](gate-profile.toml), outside `nix develop`, on a Mac with
+the Xcode named by `.xcode-version` installed, Python 3.11 or newer (for `tomllib`), and Ruby (for Psych). Currently that is:
 
 ```sh
-make test
+preflight run-gates --part test
 ```
+
+See [preflight's README](https://github.com/westdorp/preflight#requirements-and-profile-commands)
+for gate-profile and evidence requirements.
 
 The gate includes `make test-dependency-owners`, which fails when a non-test
 target reaches a package outside `swiftlang`, `apple`, and `westdorp`;
