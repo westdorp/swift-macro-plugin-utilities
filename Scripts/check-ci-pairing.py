@@ -16,7 +16,21 @@ class GateError(Exception):
 
 def parse_workflow(source, run):
     result = run(
-        ["ruby", "-rpsych", "-rjson", "-e", "puts JSON.generate(Psych.safe_load(STDIN.read, aliases: true))"],
+        ["ruby", "-rpsych", "-rjson", "-e", """
+stream = Psych.parse_stream(STDIN.read)
+document = stream.children.first
+if document && document.root.is_a?(Psych::Nodes::Mapping)
+  # Psych uses YAML 1.1; quote workflow keys so GitHub's `on` stays a string.
+  document.root.children.each_slice(2) do |key, _|
+    if key.is_a?(Psych::Nodes::Scalar)
+      key.style = Psych::Nodes::Scalar::DOUBLE_QUOTED
+      key.plain = false
+      key.quoted = true
+    end
+  end
+end
+puts JSON.generate(Psych.safe_load(stream.to_yaml, aliases: true))
+"""],
         input=source, text=True, capture_output=True,
     )
     if result.returncode:
@@ -24,16 +38,27 @@ def parse_workflow(source, run):
     return json.loads(result.stdout)
 
 
-def required_step(step):
-    return "if" not in step and step.get("continue-on-error", False) is False
+CHECKOUT = {
+    "name": "Checkout",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+}
+SELECT_XCODE = {"name": "Select the committed Xcode", "uses": "./.github/actions/select-xcode"}
+WORKFLOW_KEYS = {"name", "on", "permissions", "concurrency", "jobs"}
+MACOS_JOB_KEYS = {"name", "runs-on", "steps", "needs", "timeout-minutes", "permissions"}
 
 
-def violations(workflow, profile):
-    if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs"), dict):
-        raise GateError("workflow must contain a jobs mapping")
+def violations(workflows, profile):
+    if "ci.yml" not in workflows:
+        raise GateError("ci.yml must exist")
+    for filename, workflow in workflows.items():
+        if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs"), dict):
+            raise GateError(f"{filename}: workflow must contain a jobs mapping")
     if not isinstance(profile, dict) or not isinstance(profile.get("parts"), list):
         raise GateError("profile must contain a parts array")
     found = []
+    extra = workflows["ci.yml"].keys() - WORKFLOW_KEYS
+    if extra:
+        found.append(f"ci.yml: unsupported workflow keys {', '.join(sorted(extra))}")
     for field, expected in (("version", 2), ("platforms", ["aarch64-darwin"])):
         if profile.get(field) != expected:
             found.append(f"profile {field}: expected {expected!r}, got {profile.get(field)!r}")
@@ -43,18 +68,31 @@ def violations(workflow, profile):
             found.append("profile part must be a table with a string id")
             continue
         parts.setdefault(part["id"], []).append(part)
+    macos_jobs = {}
+    check_names = set()
+    for filename, workflow in workflows.items():
+        for job_id, job in workflow["jobs"].items():
+            if not isinstance(job, dict):
+                found.append(f"{job_id}: job must be a mapping")
+                continue
+            check = job.get("name", job_id)
+            if isinstance(check, str) and "${{" in check:
+                found.append(f"{job_id}: name must not contain expressions")
+            elif filename == "ci.yml" and isinstance(check, str):
+                check_names.add(check)
+            runner = job.get("runs-on")
+            labels = runner if isinstance(runner, list) else [runner]
+            if any(not isinstance(label, str) or "${{" in label for label in labels):
+                found.append(f"{job_id}: runs-on must be a literal label or list of literal labels")
+                continue
+            if not any(label.startswith(("macos-", "xcode-")) for label in labels):
+                continue
+            if filename != "ci.yml":
+                found.append(f"{filename}: macOS job {job_id} must be in ci.yml")
+                continue
+            macos_jobs[job_id] = (job, labels)
     expected_ids = set()
-    for job_id, job in workflow["jobs"].items():
-        if not isinstance(job, dict):
-            found.append(f"{job_id}: job must be a mapping")
-            continue
-        runner = job.get("runs-on")
-        labels = runner if isinstance(runner, list) else [runner]
-        if any(not isinstance(label, str) or "${{" in label for label in labels):
-            found.append(f"{job_id}: runs-on must be a literal label or list of literal labels")
-            continue
-        if not any(label.startswith(("macos-", "xcode-")) for label in labels):
-            continue
+    for job_id, (job, labels) in macos_jobs.items():
         strategy = job.get("strategy", {})
         if isinstance(strategy, dict) and "matrix" in strategy:
             found.append(
@@ -63,48 +101,43 @@ def violations(workflow, profile):
             )
             continue
         check = job.get("name", job_id)
-        if not isinstance(strategy, dict) or not isinstance(check, str):
-            found.append(f"{job_id}: strategy must be a mapping and name must be a string")
+        if not isinstance(check, str):
+            found.append(f"{job_id}: name must be a string")
             continue
+        macos_runner = any(label.startswith("macos-") for label in labels)
+        xcode_runner = any(label.startswith("xcode-") for label in labels)
+        allowed_keys = MACOS_JOB_KEYS | ({"env"} if xcode_runner and not macos_runner else set())
+        extra = job.keys() - allowed_keys
+        if extra:
+            found.append(f"{job_id}: unsupported job keys {', '.join(sorted(extra))}")
         command = f"make ci-{job_id}"
         steps = job.get("steps")
         if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
             found.append(f"{job_id}: steps must be an array of mappings")
             steps = []
         selector = ["--xcode-version-file", ".xcode-version"]
-        env = job.get("env", {})
-        if not isinstance(env, dict):
-            found.append(f"{job_id}: env must be a mapping")
-            env = {}
-        gate_steps = [step for step in steps if isinstance(step.get("run"), str) and step["run"].strip() == command]
-        for step in gate_steps:
-            if not required_step(step):
-                found.append(f"{job_id}: {command!r} must run unconditionally and fail on errors")
-            step_env = step.get("env", {})
-            if isinstance(step_env, dict):
-                env = {**env, **step_env}
-            else:
-                found.append(f"{job_id}: gate step env must be a mapping")
-        developer_dir = env.get("DEVELOPER_DIR")
-        checkouts = [i for i, step in enumerate(steps) if str(step.get("uses", "")).lower().startswith("actions/checkout@")]
-        if len(checkouts) != 1:
-            found.append(f"{job_id}: expected exactly one checkout")
-        if developer_dir is not None:
-            pinned = re.fullmatch(r"/Applications/Xcode_([0-9]+(?:\.[0-9]+)+)\.app/Contents/Developer", str(developer_dir))
+        if xcode_runner:
+            env = job.get("env")
+            pinned = None
+            if isinstance(env, dict) and env.keys() == {"DEVELOPER_DIR"} and isinstance(env["DEVELOPER_DIR"], str):
+                pinned = re.fullmatch(r"/Applications/Xcode_([0-9]+(?:\.[0-9]+)+)\.app/Contents/Developer", env["DEVELOPER_DIR"])
             if pinned:
                 selector = ["--xcode", pinned[1]]
             else:
-                found.append(f"{job_id}: explicit DEVELOPER_DIR must name a versioned Xcode application")
+                found.append(f"{job_id}: explicit DEVELOPER_DIR must be the only env entry and name a versioned Xcode application")
+        checkouts = [i for i, step in enumerate(steps) if step == CHECKOUT]
+        if len(checkouts) != 1:
+            found.append(f"{job_id}: expected exactly one checkout")
         for index in checkouts:
             selection = steps[index + 1] if index + 1 < len(steps) else {}
-            if (any(label.startswith("macos-") for label in labels) or developer_dir is None) and not (
-                selection.get("uses") == "./.github/actions/select-xcode" and required_step(selection)
-            ):
+            if macos_runner and selection != SELECT_XCODE:
                 found.append(f"{job_id}: select the committed Xcode immediately after checkout")
-        commands = [
-            step["run"].strip() if isinstance(step["run"], str) else step["run"]
-            for step in steps if "run" in step
-        ]
+        allowed_setup = [CHECKOUT, SELECT_XCODE] if macos_runner else [CHECKOUT]
+        for index, step in enumerate(steps):
+            gate_step = step.keys() == {"name", "run"} and isinstance(step["name"], str) and step["run"] == command
+            if step not in allowed_setup and not gate_step:
+                found.append(f"{job_id}: unsupported step {index + 1}: {step!r}")
+        commands = [step["run"] for step in steps if "run" in step]
         if commands != [command]:
             found.append(f"{job_id}: expected exactly one run step {command!r}, got {commands!r}")
         expected = [
@@ -129,8 +162,16 @@ def violations(workflow, profile):
     for part_id, matches in parts.items():
         for part in matches:
             argv = part.get("argv", [])
-            if part_id not in expected_ids and (part.get("kind") == "ci" or isinstance(argv, list) and argv[:1] == ["xcode-test"]):
+            if part_id not in expected_ids and isinstance(argv, list) and argv[:1] == ["xcode-test"]:
                 found.append(f"{part_id}: no corresponding macOS CI instance")
+            if part.get("kind") == "ci":
+                checks = part.get("checks")
+                if not isinstance(checks, list) or not checks or any(
+                    not isinstance(check, dict) or check.get("app") != "github-actions"
+                    or not isinstance(check.get("name"), str) or check["name"] not in check_names
+                    for check in checks
+                ):
+                    found.append(f"{part_id}: checks must name existing jobs in ci.yml")
     return found
 
 
@@ -139,9 +180,13 @@ def main():
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     root = parser.parse_args().repo_root
     try:
-        workflow = parse_workflow((root / ".github/workflows/ci.yml").read_text(), subprocess.run)
+        workflows = {
+            file.name: parse_workflow(file.read_text(), subprocess.run)
+            for file in sorted((root / ".github/workflows").iterdir())
+            if file.is_file() and file.suffix in {".yml", ".yaml"}
+        }
         profile = tomllib.loads((root / "gate-profile.toml").read_text())
-        found = violations(workflow, profile)
+        found = violations(workflows, profile)
     except (GateError, OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

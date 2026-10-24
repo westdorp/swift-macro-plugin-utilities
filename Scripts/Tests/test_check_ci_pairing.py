@@ -30,10 +30,35 @@ class PairingTests(unittest.TestCase):
         self.job = self.workflow["jobs"]["test"]
 
     def errors(self):
-        return "\n".join(gate.violations(self.workflow, self.profile))
+        return "\n".join(gate.violations({"ci.yml": self.workflow}, self.profile))
 
     def test_valid_fixture_passes(self):
         self.assertEqual(self.errors(), "")
+
+    def test_ci_top_level_keys_are_closed(self):
+        source = (FIXTURES / "ci.yml").read_text()
+        for field, value in (
+            ("env", "{DEVELOPER_DIR: /other}"),
+            ("defaults", "{run: {working-directory: other}}"),
+            ("unexpected", "null"), ("true", "null"),
+        ):
+            with self.subTest(field=field):
+                workflow = gate.parse_workflow(f"{field}: {value}\n{source}", subprocess.run)
+                self.assertIn(
+                    "ci.yml: unsupported workflow keys",
+                    "\n".join(gate.violations({"ci.yml": workflow}, self.profile)),
+                )
+        self.workflow.update(permissions={"contents": "read"}, concurrency="ci")
+        self.assertEqual(self.errors(), "")
+
+    def test_job_names_must_not_contain_expressions(self):
+        for filename, runner in (("ci.yml", "macos-26"), ("ci.yml", "ubuntu-latest"),
+                                 ("other.yaml", "ubuntu-latest")):
+            with self.subTest(filename=filename, runner=runner):
+                workflow = copy.deepcopy(self.workflow)
+                workflow["jobs"]["test"].update(name="Package ${{ github.ref }}", **{"runs-on": runner})
+                workflows = {"ci.yml": self.workflow, filename: workflow}
+                self.assertIn("test: name must not contain expressions", "\n".join(gate.violations(workflows, self.profile)))
 
     def test_psych_rejects_malformed_yaml_and_object_tags(self):
         for source in ("jobs: [", "--- !ruby/object:Object {}"):
@@ -42,12 +67,12 @@ class PairingTests(unittest.TestCase):
 
     def test_psych_resolves_yaml_aliases(self):
         workflow = gate.parse_workflow("jobs:\n  linux: &job {runs-on: ubuntu-latest}\n  other: *job\n", subprocess.run)
-        self.assertEqual(gate.violations(workflow, {"version": 2, "platforms": ["aarch64-darwin"], "parts": []}), [])
+        self.assertEqual(gate.violations({"ci.yml": workflow}, {"version": 2, "platforms": ["aarch64-darwin"], "parts": []}), [])
 
     def test_missing_or_malformed_top_level_inputs_fail(self):
         for workflow, profile in ((None, self.profile), ({}, self.profile), (self.workflow, {})):
             with self.subTest(workflow=workflow, profile=profile), self.assertRaises(gate.GateError):
-                gate.violations(workflow, profile)
+                gate.violations({"ci.yml": workflow}, profile)
 
     def test_profile_version_and_platforms_are_checked(self):
         self.profile.update(version=1, platforms=["x86_64-linux"])
@@ -61,7 +86,7 @@ class PairingTests(unittest.TestCase):
                 with self.subTest(index=index, field=field):
                     profile = copy.deepcopy(self.profile)
                     del profile["parts"][index][field]
-                    self.assertTrue(gate.violations(self.workflow, profile))
+                    self.assertTrue(gate.violations({"ci.yml": self.workflow}, profile))
 
     def test_wrong_values_and_extra_fields_fail(self):
         for index, field, value in (
@@ -74,7 +99,7 @@ class PairingTests(unittest.TestCase):
             with self.subTest(index=index, field=field, value=value):
                 profile = copy.deepcopy(self.profile)
                 profile["parts"][index][field] = value
-                self.assertTrue(gate.violations(self.workflow, profile))
+                self.assertTrue(gate.violations({"ci.yml": self.workflow}, profile))
 
     def test_duplicate_parts_fail(self):
         self.profile["parts"] += copy.deepcopy(self.profile["parts"])
@@ -82,7 +107,8 @@ class PairingTests(unittest.TestCase):
 
     def test_orphaned_local_and_ci_parts_fail(self):
         self.workflow["jobs"].clear()
-        self.assertEqual(self.errors().count("no corresponding macOS CI instance"), 2)
+        self.assertIn("test: no corresponding macOS CI instance", self.errors())
+        self.assertIn("test-ci: checks must name existing jobs in ci.yml", self.errors())
 
     def test_every_mismatch_is_reported(self):
         del self.job["steps"][1]
@@ -107,9 +133,18 @@ class PairingTests(unittest.TestCase):
                 self.job["steps"][1]["uses"] = uses
                 self.assertIn("immediately after checkout", self.errors())
 
-    def test_xcode_selection_action_name_is_not_required(self):
-        del self.job["steps"][1]["name"]
-        self.assertEqual(self.errors(), "")
+    def test_setup_steps_must_match_their_exact_content(self):
+        for index in (0, 1):
+            for field in self.job["steps"][index]:
+                with self.subTest(index=index, field=field):
+                    workflow = copy.deepcopy(self.workflow)
+                    del workflow["jobs"]["test"]["steps"][index][field]
+                    self.assertTrue(gate.violations({"ci.yml": workflow}, self.profile))
+        self.job["steps"][0]["uses"] = "actions/checkout@other"
+        self.assertTrue(self.errors())
+        self.job["steps"][0] = copy.deepcopy(type(self).workflow["jobs"]["test"]["steps"][0])
+        self.job["steps"].insert(2, {"uses": "some/action@pin"})
+        self.assertIn("unsupported step", self.errors())
 
     def test_macos_explicit_pin_does_not_replace_selection_action(self):
         self.job["env"] = {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}
@@ -126,7 +161,7 @@ class PairingTests(unittest.TestCase):
             with self.subTest(field=field):
                 workflow = copy.deepcopy(self.workflow)
                 workflow["jobs"]["test"][field] = value
-                self.assertTrue(gate.violations(workflow, self.profile))
+                self.assertTrue(gate.violations({"ci.yml": workflow}, self.profile))
         for value in (None, False, {"command": "make ci-test"}):
             with self.subTest(run=value):
                 self.job["steps"][-1]["run"] = value
@@ -137,14 +172,14 @@ class PairingTests(unittest.TestCase):
             with self.subTest(field=field):
                 workflow = copy.deepcopy(self.workflow)
                 workflow["jobs"]["test"]["steps"][1][field] = value
-                self.assertTrue(gate.violations(workflow, self.profile))
+                self.assertTrue(gate.violations({"ci.yml": workflow}, self.profile))
 
     def test_gate_step_cannot_be_skipped_or_allowed_to_fail(self):
         for field, value in (("if", False), ("continue-on-error", True)):
             with self.subTest(field=field):
                 workflow = copy.deepcopy(self.workflow)
                 workflow["jobs"]["test"]["steps"][-1][field] = value
-                self.assertTrue(gate.violations(workflow, self.profile))
+                self.assertTrue(gate.violations({"ci.yml": workflow}, self.profile))
 
     def test_checkout_missing_duplicate_or_last_fails(self):
         steps = self.job["steps"]
@@ -154,7 +189,7 @@ class PairingTests(unittest.TestCase):
                 self.assertTrue(self.errors())
 
     def test_gate_command_must_be_the_single_literal_make_step(self):
-        for command in ("make test", "make ci-test && swift test", "make ci-test\nswift test", "make ci-other"):
+        for command in ("make test", "make ci-test && swift test", "make ci-test\nswift test", "make ci-other", " make ci-test", "make ci-test\n"):
             with self.subTest(command=command):
                 self.job["steps"][-1]["run"] = command
                 self.assertIn("exactly one run step", self.errors())
@@ -208,7 +243,7 @@ class PairingTests(unittest.TestCase):
                     self.assertIn(
                         "macOS job test uses a matrix; split it into one job per instance, "
                         "or extend this check when a real need appears",
-                        gate.violations(workflow, self.profile),
+                        gate.violations({"ci.yml": workflow}, self.profile),
                     )
 
     def test_unsupported_matrix_shapes_fail_instead_of_skipping_instances(self):
@@ -218,7 +253,7 @@ class PairingTests(unittest.TestCase):
                 self.assertIn(
                     "macOS job test uses a matrix; split it into one job per instance, "
                     "or extend this check when a real need appears",
-                    gate.violations(self.workflow, self.profile),
+                    gate.violations({"ci.yml": self.workflow}, self.profile),
                 )
 
     def test_explicit_second_xcode_uses_its_version(self):
@@ -232,11 +267,94 @@ class PairingTests(unittest.TestCase):
         self.job["env"]["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
         self.assertIn("explicit DEVELOPER_DIR", self.errors())
 
-    def test_gate_step_toolchain_override_must_match_its_local_part(self):
-        self.job["steps"][-1]["env"] = {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}
-        self.assertIn("test argv", self.errors())
-        self.profile["parts"][0]["argv"][1:3] = ["--xcode", "27.1"]
+    def test_unsupported_job_keys_are_refused(self):
+        for field, value in (
+            ("env", {}), ("env", {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}),
+            ("if", True), ("continue-on-error", False), ("defaults", {"run": {"working-directory": "other"}}),
+            ("strategy", {}), ("container", "swift"), ("services", {}), ("outputs", {}),
+            ("working-directory", "other"), ("unexpected", None),
+        ):
+            with self.subTest(field=field, value=value):
+                workflow = copy.deepcopy(self.workflow)
+                workflow["jobs"]["test"][field] = value
+                self.assertIn("unsupported job keys", "\n".join(gate.violations({"ci.yml": workflow}, self.profile)))
+        self.job.update(needs=["lint"], **{"timeout-minutes": 20, "permissions": {"contents": "read"}})
         self.assertEqual(self.errors(), "")
+
+    def test_steps_refuse_every_extra_key(self):
+        for index in range(3):
+            for field, value in (
+                ("env", {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}),
+                ("working-directory", "other"), ("if", True), ("continue-on-error", False),
+                ("shell", "bash"), ("with", {}), ("id", "step"), ("timeout-minutes", 10),
+            ):
+                with self.subTest(index=index, field=field):
+                    workflow = copy.deepcopy(self.workflow)
+                    workflow["jobs"]["test"]["steps"][index][field] = value
+                    self.assertIn("unsupported step", "\n".join(gate.violations({"ci.yml": workflow}, self.profile)))
+        del self.job["steps"][-1]["name"]
+        self.assertIn("unsupported step", self.errors())
+
+    def test_xcode_runner_requires_exact_job_pin_and_refuses_selection_action(self):
+        self.job["runs-on"] = "xcode-27.1"
+        del self.job["steps"][1]
+        self.profile["parts"][0]["argv"][1:3] = ["--xcode", "27.1"]
+        for env in (
+            None, {}, False, {"OTHER": "value"}, {"DEVELOPER_DIR": None},
+            {"DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"},
+            {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer", "OTHER": "value"},
+        ):
+            with self.subTest(env=env):
+                self.job["env"] = env
+                self.assertIn("explicit DEVELOPER_DIR", self.errors())
+        del self.job["env"]
+        self.assertIn("explicit DEVELOPER_DIR", self.errors())
+        self.job["env"] = {"DEVELOPER_DIR": "/Applications/Xcode_27.1.app/Contents/Developer"}
+        self.assertEqual(self.errors(), "")
+        self.job["steps"].insert(1, copy.deepcopy(type(self).workflow["jobs"]["test"]["steps"][1]))
+        self.assertIn("unsupported step", self.errors())
+
+    def test_ci_checks_must_each_name_existing_jobs_on_any_runner(self):
+        self.workflow["jobs"]["linux"] = {"name": "Linux Gate", "runs-on": "ubuntu-latest"}
+        part = {"id": "linux-ci", "kind": "ci", "level": "build", "proves": ["x86_64-linux"],
+                "checks": [{"app": "github-actions", "name": "Linux Gate"}]}
+        self.profile["parts"].append(part)
+        self.assertEqual(self.errors(), "")
+        for checks in (None, [], "Linux Gate", [None], [{"name": []}],
+                       [{"app": "github-actions", "name": "gone"}],
+                       [*part["checks"], {"app": "github-actions", "name": "gone"}]):
+            with self.subTest(checks=checks):
+                part["checks"] = checks
+                self.assertIn("linux-ci: checks must name existing jobs in ci.yml", self.errors())
+        part["checks"] = [{"app": "github-actions", "name": "Linux Gate"}]
+        del self.workflow["jobs"]["linux"]
+        self.assertIn("linux-ci: checks must name existing jobs in ci.yml", self.errors())
+
+    def test_cli_reads_both_workflow_extensions_and_refuses_other_macos_jobs(self):
+        with tempfile.TemporaryDirectory(prefix="ci-pairing-tests-") as directory:
+            root = Path(directory)
+            workflows = root / ".github/workflows"
+            workflows.mkdir(parents=True)
+            source = (FIXTURES / "ci.yml").read_text()
+            (workflows / "ci.yml").write_text(source)
+            (root / "gate-profile.toml").write_text((FIXTURES / "gate-profile.toml").read_text())
+            command = [sys.executable, "-I", "-B", str(SCRIPT), "--repo-root", str(root)]
+            for filename in ("other.yml", "other.yaml", "ci.yaml"):
+                extra = workflows / filename
+                for runner in ("macos-26", "xcode-27.1"):
+                    with self.subTest(filename=filename, runner=runner):
+                        extra.write_text(source.replace("macos-26", runner))
+                        result = subprocess.run(command, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 1, result.stdout)
+                        self.assertIn(f"{filename}: macOS job test must be in ci.yml", result.stderr)
+                extra.write_text("jobs: {linux: {runs-on: ubuntu-latest}}")
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                extra.write_text("jobs: [")
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("workflow YAML", result.stderr)
+                extra.unlink()
 
     def test_cli_passes_and_reports_parse_failures(self):
         with tempfile.TemporaryDirectory(prefix="ci-pairing-tests-") as directory:
@@ -255,6 +373,38 @@ class PairingTests(unittest.TestCase):
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("ERROR:", result.stderr)
+
+
+class LocalCommandTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="ci-pairing-commands-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        repo = SCRIPT.parent.parent
+        for relative in ("Makefile",):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text((repo / relative).read_text())
+            target.chmod((repo / relative).stat().st_mode)
+        tests = self.root / "Scripts/Tests"
+        tests.mkdir(parents=True)
+        for relative in ("Scripts/check-ci-pairing.py", "Scripts/Tests/test_check_ci_pairing.py"):
+            (self.root / relative).write_text(
+                "import json, sys\nfrom pathlib import Path\n"
+                "with Path('pairing-calls.jsonl').open('a') as output:\n"
+                "    output.write(json.dumps(bool(sys.flags.dont_write_bytecode)) + '\\n')\n"
+            )
+
+    def run_make(self, target):
+        result = subprocess.run(
+            ["make", "--no-print-directory", target, f"PYTHON={sys.executable}"],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pairing_commands_disable_bytecode(self):
+        self.run_make("test-ci-pairing")
+        self.assertEqual((self.root / "pairing-calls.jsonl").read_text().splitlines(), ["true", "true"])
 
 
 if __name__ == "__main__":
