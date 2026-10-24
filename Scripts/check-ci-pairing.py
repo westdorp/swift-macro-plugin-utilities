@@ -46,7 +46,7 @@ def job_instances(job_id, job):
         raise GateError(f"{job_id}: matrix values must be strings or numbers")
     expression = re.compile(r"\$\{\{\s*matrix\." + re.escape(key) + r"\s*\}\}")
     instances = [
-        (f"{job_id}-{value}", expression.sub(str(value), job.get("name", job_id)))
+        (f"{job_id}-{value}", expression.sub(str(value), job.get("name", f"{job_id} ({value})")))
         for value in values
     ]
     return instances, f"make ci-{job_id}-${{{{ matrix.{key} }}}}"
@@ -76,9 +76,12 @@ def violations(workflow, profile):
         if not isinstance(job, dict):
             found.append(f"{job_id}: job must be a mapping")
             continue
-        runner = job.get("runs-on", "")
+        runner = job.get("runs-on")
         labels = runner if isinstance(runner, list) else [runner]
-        if not any(isinstance(label, str) and label.startswith(("macos-", "xcode-")) for label in labels):
+        if any(not isinstance(label, str) or "${{" in label for label in labels):
+            found.append(f"{job_id}: runs-on must be a literal label or list of literal labels")
+            continue
+        if not any(label.startswith(("macos-", "xcode-")) for label in labels):
             continue
         try:
             instances, command = job_instances(job_id, job)

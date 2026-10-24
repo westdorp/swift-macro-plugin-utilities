@@ -81,7 +81,8 @@ changes.
 
 Before pushing, run `preflight run-gates --part <id>` for each local part in
 [`gate-profile.toml`](gate-profile.toml), outside `nix develop`, on a Mac with
-the Xcode named by `.xcode-version` installed. Currently that is:
+the Xcode named by `.xcode-version` installed and Python 3.11 or newer
+(for `tomllib`). Currently that is:
 
 ```sh
 preflight run-gates --part test

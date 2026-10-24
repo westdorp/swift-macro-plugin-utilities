@@ -160,6 +160,16 @@ class PairingTests(unittest.TestCase):
         for fragment in ("other: expected exactly one checkout", "other: expected exactly one profile part", "other-ci:"):
             self.assertIn(fragment, errors)
 
+    def test_nonliteral_runner_labels_report_errors(self):
+        for runner in (
+            "${{ matrix.os }}", "macos-${{ matrix.version }}",
+            ["self-hosted", "${{ matrix.os }}"],
+            {"group": "macos"}, None, False, 26, ["ubuntu-latest", 26],
+        ):
+            with self.subTest(runner=runner):
+                self.workflow["jobs"]["unknown"] = {"runs-on": runner}
+                self.assertEqual(self.errors(), "unknown: runs-on must be a literal label or list of literal labels")
+
     def test_runner_label_lists_and_unnamed_jobs(self):
         self.job["runs-on"] = ["self-hosted", "macos-26"]
         del self.job["name"]
@@ -181,6 +191,22 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(self.errors(), "")
         self.profile["parts"].pop()
         self.assertIn("test-release-ci: expected exactly one profile part", self.errors())
+
+    def test_unnamed_matrix_instances_use_job_id_and_value_as_check_names(self):
+        del self.job["name"]
+        self.job["strategy"] = {"matrix": {"mode": ["debug", "release"]}}
+        self.job["steps"][-1]["run"] = "make ci-test-${{ matrix.mode }}"
+        self.profile["parts"] = []
+        for mode in ("debug", "release"):
+            local, ci = copy.deepcopy(type(self).profile["parts"])
+            local["id"] = f"test-{mode}"
+            local["argv"][-1] = f"ci-test-{mode}"
+            ci["id"] = f"test-{mode}-ci"
+            ci["checks"][0]["name"] = f"test ({mode})"
+            self.profile["parts"].extend([local, ci])
+        self.assertEqual(self.errors(), "")
+        self.profile["parts"][1]["checks"][0]["name"] = "test"
+        self.assertIn("test-debug-ci checks", self.errors())
 
     def test_unsupported_matrix_shapes_fail_instead_of_skipping_instances(self):
         for matrix in ("${{ fromJSON(needs.plan.outputs.matrix) }}", {}, {"mode": []}, {"include": [{}]}, {"a": [1], "b": [2]}):
