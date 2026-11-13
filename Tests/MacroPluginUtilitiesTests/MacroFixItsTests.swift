@@ -53,8 +53,8 @@ struct MacroFixItsTests {
         #expect(replacementClass?.description == "public /* keep */ final class Target {}")
     }
 
-    @Test("Add-main-actor returns one complete attribute-list replacement")
-    func addMainActorCreatesAttributeList() throws {
+    @Test("Add-main-actor returns one complete declaration replacement")
+    func addMainActorReplacesDeclaration() throws {
         let classDecl = try parseClass("class Target {}")
 
         let fixIt = makeAddMainActorFixIt(
@@ -62,12 +62,10 @@ struct MacroFixItsTests {
             fixItMessage: MacroFixItMessage("Add MainActor", domain: "Tests")
         )
         let replacement = try #require(firstReplacement(in: fixIt))
-        let replacementAttributes = replacement.newNode
-            .as(AttributeListSyntax.self)
 
         #expect(fixIt.changes.count == 1)
-        #expect(replacement.oldNode == Syntax(classDecl.attributes))
-        #expect(replacementAttributes?.description == "@MainActor\n")
+        #expect(replacement.oldNode == Syntax(classDecl))
+        #expect(replacement.newNode.as(ClassDeclSyntax.self)?.attributes.description == "@MainActor\n")
     }
 
     @Test("Add-main-actor preserves qualified attributes, comments, and order")
@@ -85,10 +83,10 @@ struct MacroFixItsTests {
         )
         let replacement = try #require(firstReplacement(in: fixIt))
         let replacementAttributes = replacement.newNode
-            .as(AttributeListSyntax.self)
+            .as(ClassDeclSyntax.self)?.attributes
 
         #expect(fixIt.changes.count == 1)
-        #expect(replacement.oldNode == Syntax(classDecl.attributes))
+        #expect(replacement.oldNode == Syntax(classDecl))
         #expect(
             replacementAttributes?.description
                 == """
@@ -96,6 +94,37 @@ struct MacroFixItsTests {
                 @Module.Existing // keep
                 """
         )
+    }
+
+    @Test("Add-main-actor puts the attribute on its own line at the declaration's indentation")
+    func addMainActorKeepsItsOwnLine() throws {
+        let cases: [(source: String, fixed: String)] = [
+            (
+                "enum Outer {\n    @Existing\n    class Target {}\n}",
+                "enum Outer {\n    @MainActor\n    @Existing\n    class Target {}\n}"
+            ),
+            (
+                "enum Outer {\n    final class Target {}\n}",
+                "enum Outer {\n    @MainActor\n    final class Target {}\n}"
+            ),
+            (
+                "import Module\n\nclass Target {}",
+                "import Module\n\n@MainActor\nclass Target {}"
+            ),
+            (
+                "class Target {}",
+                "@MainActor\nclass Target {}"
+            ),
+        ]
+        for (source, fixed) in cases {
+            let tree = Parser.parse(source: source)
+            let classDecl = try #require(tree.firstClass)
+            let fixIt = makeAddMainActorFixIt(
+                for: classDecl,
+                fixItMessage: MacroFixItMessage("Add MainActor", domain: "Tests")
+            )
+            #expect(applying(fixIt, to: tree) == fixed, "\(source)")
+        }
     }
 
     @Test("Remove-initializer replaces only the binding and trims horizontal residue")
@@ -165,4 +194,32 @@ private func firstReplacement(in fixIt: FixIt) -> (oldNode: Syntax, newNode: Syn
         return nil
     }
     return (oldNode, newNode)
+}
+
+private extension SourceFileSyntax {
+    var firstClass: ClassDeclSyntax? {
+        final class Finder: SyntaxVisitor {
+            var found: ClassDeclSyntax?
+            override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
+                if found == nil { found = node }
+                return .skipChildren
+            }
+        }
+        let finder = Finder(viewMode: .sourceAccurate)
+        finder.walk(self)
+        return finder.found
+    }
+}
+
+/// Applies a fix-it's edits the way the compiler does: each change replaces its
+/// source range, including trivia.
+private func applying(_ fixIt: FixIt, to tree: SourceFileSyntax) -> String {
+    var bytes = Array(tree.description.utf8)
+    for edit in fixIt.edits.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
+        bytes.replaceSubrange(
+            edit.range.lowerBound.utf8Offset..<edit.range.upperBound.utf8Offset,
+            with: Array(edit.replacement.utf8)
+        )
+    }
+    return String(decoding: bytes, as: UTF8.self)
 }
