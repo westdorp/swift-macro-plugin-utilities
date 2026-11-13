@@ -31,23 +31,44 @@ public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: Macr
     )
 }
 
-/// Creates a one-change fix-it that prepends `@MainActor` to the attributes.
+/// Creates a one-change fix-it that prepends `@MainActor` on its own line.
+///
+/// The attribute takes the declaration's leading trivia, so it stays on the
+/// declaration's line; the rest of the declaration follows on a new line at the
+/// same indentation.
 public func makeAddMainActorFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt {
+    let leadingTrivia = classDecl.leadingTrivia
     let mainActorAttribute = AttributeSyntax(
+        leadingTrivia: leadingTrivia,
         atSign: .atSignToken(),
         attributeName: IdentifierTypeSyntax(name: .identifier("MainActor")),
-        trailingTrivia: .newlines(1)
+        trailingTrivia: .newline + indentation(of: leadingTrivia)
     )
-    let updatedAttributes = AttributeListSyntax(
-        [.attribute(mainActorAttribute)] + Array(classDecl.attributes)
+    var updatedClassDecl = classDecl.with(\.leadingTrivia, [])
+    updatedClassDecl.attributes = AttributeListSyntax(
+        [.attribute(mainActorAttribute)] + Array(updatedClassDecl.attributes)
     )
 
     return FixIt(
         message: fixItMessage,
         changes: [
-            .replace(oldNode: Syntax(classDecl.attributes), newNode: Syntax(updatedAttributes))
+            .replace(oldNode: Syntax(classDecl), newNode: Syntax(updatedClassDecl))
         ]
     )
+}
+
+/// The horizontal whitespace after the last newline in `trivia`.
+private func indentation(of trivia: Trivia) -> Trivia {
+    var pieces: [TriviaPiece] = []
+    for piece in trivia.pieces.reversed() {
+        switch piece {
+        case .spaces, .tabs:
+            pieces.insert(piece, at: 0)
+        default:
+            return Trivia(pieces: pieces)
+        }
+    }
+    return Trivia(pieces: pieces)
 }
 
 /// Creates a one-change fix-it that removes a property's inline initializer.
