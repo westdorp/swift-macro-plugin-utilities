@@ -53,6 +53,33 @@ struct MacroFixItsTests {
         #expect(replacementClass?.description == "public /* keep */ final class Target {}")
     }
 
+    @Test(
+        "Add-final preserves newlines and line comments between existing modifiers and class",
+        arguments: [
+            (
+                "public\nclass Target {}",
+                "public\nfinal class Target {}"
+            ),
+            (
+                "public // keep\n    class Target {}",
+                "public // keep\n    final class Target {}"
+            ),
+        ]
+    )
+    func addFinalPreservesTriviaAfterMultilineModifiers(source: String, expected: String) throws {
+        let tree = Parser.parse(source: source)
+        #expect(!tree.hasError)
+        #expect(tree.totalLength.utf8Length == source.utf8.count)
+        let classDecl = try #require(tree.firstClass)
+
+        let fixIt = makeAddFinalFixIt(
+            for: classDecl,
+            fixItMessage: MacroFixItMessage("Add final", domain: "Tests")
+        )
+
+        #expect(Array(applying(fixIt, to: tree).utf8) == Array(expected.utf8))
+    }
+
     @Test("Add-main-actor returns one complete declaration replacement")
     func addMainActorReplacesDeclaration() throws {
         let classDecl = try parseClass("class Target {}")
@@ -118,6 +145,8 @@ struct MacroFixItsTests {
         ]
         for (source, fixed) in cases {
             let tree = Parser.parse(source: source)
+            #expect(!tree.hasError)
+            #expect(tree.totalLength.utf8Length == source.utf8.count)
             let classDecl = try #require(tree.firstClass)
             let fixIt = makeAddMainActorFixIt(
                 for: classDecl,
@@ -178,8 +207,11 @@ struct MacroFixItsTests {
 }
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
-    try #require(
-        Parser.parse(source: source)
+    let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
+    return try #require(
+        sourceFile
             .statements.first?
             .item.as(DeclSyntax.self)?
             .as(ClassDeclSyntax.self)

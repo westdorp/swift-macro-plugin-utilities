@@ -48,18 +48,173 @@ struct MacroDeclarationQueriesTests {
         "Type matching accepts equivalent spellings",
         arguments: [
             ("Error?", "Error?"),
+            ("Int?", "Optional<Int>"),
+            ("Int?", "Optional<Int,>"),
+            ("Optional<Int,>", "Int?"),
+            ("Int?", "Swift.Optional<Int>"),
+            ("Swift.Int?", "Optional<Int>"),
+            ("Swift.Int?", "Swift.Optional<Int>"),
+            ("Optional<Int>", "Swift.Optional<Int>"),
+            ("MyModule.Optional<Int,>", "MyModule.Optional<Int>"),
+            ("Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
+            ("Int?.Marker", "Optional<Int>.Marker"),
+            ("Optional<Int>.Marker", "Int?.Marker"),
+            ("Swift.Int?.Marker", "Swift.Optional<Int>.Marker"),
+            ("(Swift.Int, Swift.String)", "(Int,String)"),
+            ("(a: Swift.Int, b: Swift.String)", "(a:Int,b:String)"),
+            ("() -> Int?", "() -> Swift.Optional<Int>"),
+            ("() -> Swift.Optional<Int>", "() -> Int?"),
+            ("@Sendable (Swift.Int) async throws(Swift.Error) -> Int?", "@Sendable (Int) async throws(Error) -> Optional<Int>"),
+            ("inout Swift.Optional<Int>", "inout Int?"),
+            ("borrowing Swift.Int", "borrowing Int"),
+            ("Error", "any Error"),
+            ("any ~Copyable", "any ~Copyable"),
+            ("any P & ~Copyable", "P & ~Copyable"),
+            ("any Swift.P & ~Swift.Copyable", "P & ~Copyable"),
+            ("Int??", "Optional<Int?>"),
+            ("Int??", "Optional<Optional<Int>>"),
+            ("Int??", "Swift.Optional<Swift.Optional<Int>>"),
+            ("Int??", "Swift.Optional<Int>?"),
+            ("((Int) -> Int)?", "Optional<(Int)->Int>"),
+            ("((Int) -> Int)?", "Swift.Optional<(Int)->Int>"),
+            ("(Int, Int)?", "Optional<(Int,Int)>"),
+            ("()?", "Optional<()>"),
+            ("Box<Int?>", "Box<Optional<Int>>"),
+            ("Box<Int?>", "Box<Swift.Optional<Int>>"),
+            ("Box<[Swift.Int]>", "Box<[Int]>"),
+            ("Box<[Int?]>", "Box<[Swift.Optional<Int>]>"),
+            ("[Swift.Int]", "[Int]"),
+            ("[Swift.String: Swift.Int?]", "[String:Optional<Int>]"),
+            ("[Swift.Int].Type", "[Int].Type"),
+            ("([Swift.Int]).Type", "[Int].Type"),
+            ("[Swift.String: Swift.Int].Type", "[String:Int].Type"),
+            ("Namespace.Swift.Optional<Int>", "Namespace.Swift.Optional<Int>"),
+            ("any Swift.Equatable & Swift.Sendable", "Equatable&Swift.Sendable"),
+            ("any Swift.Equatable & Swift.Sendable", "Equatable&Sendable"),
+            ("any Swift.Equatable & Swift.Sendable", "Equatable & Sendable"),
+            ("(any Swift.Equatable & Swift.Sendable)?", "(Equatable&Sendable)?"),
+            ("(any Swift.Equatable & Swift.Sendable)!", "(Equatable&Sendable)!"),
+            ("Optional<any Swift.Equatable & Swift.Sendable>", "(Equatable&Sendable)?"),
+            ("Optional<any Swift.Equatable & Swift.Sendable>", "Optional<Equatable&Sendable>"),
+            ("(any Swift.Equatable & Swift.Sendable).Type", "(any Equatable&Sendable).Type"),
+            ("(Swift.Equatable & Swift.Sendable).Type", "(Equatable&Sendable).Type"),
+            ("Optional<Int>.Type", "Swift.Optional<Int>.Type"),
+            ("Int?.Type", "Optional<Int>.Type"),
+            ("Int?.Type", "Swift.Optional<Int>.Type"),
             ("(any Error)?", "Error?"),
+            ("(any Error)?", "(any Error)?"),
+            ("(any Error)?", "Optional<any Error>"),
+            ("(any Error)?", "Swift.Optional<any Error>"),
+            ("Swift.Optional<any Error>", "(any Error)?"),
+            ("Optional<any Error>", "Swift.Optional<any Error>"),
+            ("(any Swift.Error)!", "(any Error)!"),
+            ("(any Swift.Equatable & Swift.Sendable)?", "Swift.Optional<any Equatable&Sendable>"),
+            ("Swift.Optional<any Swift.Equatable & Swift.Sendable>", "(any Equatable&Sendable)?"),
+            ("Swift.Optional<any Error>?", "(any Error)??"),
+            ("any Swift.Error.Type", "any Error.Type"),
+            ("Swift.Error.Type", "any Error.Type"),
+            ("any Error", "any Error"),
+            ("any Error", "(any Error)"),
+            ("MyModule.Optional<Int>", "MyModule.Optional<Int>"),
+            ("Outer.MyModule.Optional<Int>", "MyModule.Optional<Int>"),
+            ("MyModule.Optional<Int, String>", "Optional<Int,String>"),
             ("(Error)?", "Error?"),
             ("any Error", "Error"),
             ("(any Swift.Error)?", "Error?"),
             ("Optional<Error>", "Error?"),
+            ("Optional<Error>", "Optional<Error>"),
+            ("Swift.Optional<Error>", "Error?"),
+            ("Swift.Optional<Error>", "Swift.Optional<Error>"),
+            ("Swift.Optional<Error>", "Optional<Error>"),
+            ("Swift.Optional<Int>?", "Swift.Optional<Int>?"),
+            ("Swift.Optional<Int>?", "Optional<Int>?"),
+            ("Swift.Optional<Int>?", "Int??"),
+            ("Swift.Optional<Swift.Int>?", "Optional<Int>?"),
+            ("Swift.Optional<Swift.Optional<Int>>", "Optional<Int>?"),
+            ("Swift.Optional<Swift.Error>", "Error?"),
+            ("Swift.Optional<((Int) -> Int)>", "Swift.Optional<(Int)->Int>"),
+            ("Optional<((Int) -> Int)>", "((Int)->Int)?"),
             ("Optional<any Error>", "Error?"),
             ("AVPlayer.TimeControlStatus", "AVPlayer.TimeControlStatus"),
             ("External.Error", "Error"),
+            ("someModule.Error", "Error"),
+            ("Swift.Int.Type", "Int.Type"),
+            ("Swift.Int.Type.Type", "Int.Type.Type"),
+            ("Swift.Int.Type?", "Int.Type?"),
+            ("Optional<Int>.Type", "Optional<Int>.Type"),
+            ("Swift.Optional<Int>.Type", "Optional<Int>.Type"),
+            ("Swift.Optional<Int>.Type", "Int?.Type"),
+            ("(Swift.Optional<Int>).Type", "Optional<Int>.Type"),
+            ("(Swift.Optional<Int>).Type", "Int?.Type"),
+            ("(Swift.Int).Type", "Int.Type"),
+            ("(Swift.Int).Type", "(Int).Type"),
+            ("((Swift.Int)).Type", "Int.Type"),
+            ("(Swift.Int.Type).Type", "Int.Type.Type"),
+            ("(Swift.Int?).Type", "Int?.Type"),
+            ("Swift.Int?.Type", "Int?.Type"),
+            ("Swift.Int!", "Int!"),
+            ("(any Swift.Error)!", "Error!"),
+            ("any Swift.Error.Type", "Error.Type"),
+            ("(any Error).Type", "(any Error).Type"),
+            ("(any Swift.Error).Type", "(any Error).Type"),
+            ("((any Swift.Error)).Type", "(any Error).Type"),
+            ("(any (Swift.Error)).Type", "(any Error).Type"),
+            ("(any Swift.Error.Type).Type", "(any Error.Type).Type"),
+            ("((Int, String)).Type", "(Int,String).Type"),
+            ("(()).Type", "().Type"),
+            ("([Int]).Type", "[Int].Type"),
+            ("(((Int) -> Int)?).Type", "((Int)->Int)?.Type"),
             ("Dictionary < String, Int >", "Dictionary<String,Int>"),
+            ("Module.Outer<Swift.Int>.Item", "Outer<Int>.Item"),
+            ("Swift.InlineArray<4, Swift.Int>", "InlineArray<4,Int>"),
+            ("Swift.InlineArray<4, Swift.Int>", "InlineArray<4, Int>"),
+            ("Module.Vector<-1, Swift.Int>", "Vector<-1,Int>"),
+            ("Shapes.Optional<4>", "Optional<4>"),
+            ("Shapes.Optional<-1>", "Optional<-1>"),
+            ("Swift.Optional<Int>.Marker", "Optional<Int>.Marker"),
+            ("(Swift.Optional<Int>).Marker", "Int?.Marker"),
+            ("(Swift).Optional<Int>.Marker", "(Swift).Optional<Int>.Marker"),
+            ("Namespace.Swift.Optional<Int>.Marker", "Namespace.Swift.Optional<Int>.Marker"),
+            ("[4 of Int]?", "[4 of Int]?"),
+            ("[4 of Swift.Int]", "[4 of Int]"),
+            ("[4 of Swift.Int]?", "[4 of Int]?"),
+            ("[4 of Swift.Int]!", "[4 of Int]!"),
+            ("[4 of Swift.Int].Type", "[4 of Int].Type"),
+            ("[4 of [2 of Swift.Int]]", "[4 of [2 of Int]]"),
+            ("[Swift.Int].Index", "[Int].Index"),
+            ("[Swift.String: Swift.Int].Index", "[String:Int].Index"),
+            ("[4 of Swift.Int].Index", "[4 of Int].Index"),
+            ("(_ value: Swift.Int) -> Void", "(Int)->Void"),
+            ("some Swift.Error", "some Error"),
+            ("some Collection<Swift.Int>", "some Collection<Int>"),
+            ("borrowing some Collection<Swift.Int>", "borrowing some Collection<Int>"),
+            ("(some Collection<Swift.Int>)?", "Optional<some Collection<Int>>"),
+            ("some Swift.Equatable & Swift.Sendable", "some Equatable & Sendable"),
+            ("P & ~Swift.Copyable", "P & ~Copyable"),
+            ("some (Int?).Marker", "some (Int?).Marker"),
+            ("some (Int?).Marker", "some Optional<Int>.Marker"),
+            ("some Optional<Int>.Marker", "some (Int?).Marker"),
+            ("any (Int?).Marker", "Optional<Int>.Marker"),
+            ("some [Int].Marker", "some [Int].Marker"),
+            ("some [Swift.Int].Marker", "some [Int].Marker"),
+            ("some [Swift.String: Swift.Int].Marker", "some [String: Int].Marker"),
+            ("some [4 of Swift.Int].Marker", "some [4 of Int].Marker"),
+            ("any [Swift.Int].Marker", "[Int].Marker"),
+            ("Int", "Int\n"),
+            ("Swift.Int", "  Int \n\t "),
+            ("@Sendable nonisolated(nonsending) () -> Swift.Int", "@Sendable nonisolated(nonsending) () -> Int"),
+            ("@Example(1 + +2) () -> Swift.Void", "@Example(1 + +2) () -> Void"),
+            ("(repeat each (T))", "(repeat each T)"),
+            ("(repeat each T)", "(repeat each (T))"),
+            ("Box<repeat each (T)>", "Box<repeat each T>"),
+            ("(any Swift.Error).Protocol", "(any Error).Protocol"),
+            ("any Swift.P & (Swift.Q & Swift.R)", "any P & Q & R"),
+            ("any (P & Q) & R", "P & (Q & R)"),
+            ("some P & (Q & ~Swift.Copyable)", "some P & Q & ~Copyable"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
+        _ = parseTrimmedType(expected)
         #expect(typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
@@ -67,6 +222,123 @@ struct MacroDeclarationQueriesTests {
         "Type matching rejects distinct and deceptive spellings",
         arguments: [
             ("some Error", "Error"),
+            ("some Equatable", "someEquatable"),
+            ("(some Equatable)?", "someEquatable?"),
+            ("some 🐱", "some🐱"),
+            ("Box<some Probe>", "Box<someProbe>"),
+            ("borrowing some Probe", "borrowingsomeProbe"),
+            ("some Swift.Error", "Error"),
+            ("borrowing some Swift.Error", "Error"),
+            ("(some Swift.Error)?", "Error?"),
+            ("(some Swift.Error).Type", "Error.Type"),
+            ("(any Error).Type", "Error.Type"),
+            ("(any Swift.Error).Type", "Error.Type"),
+            ("(any Swift.Error).Type", "any Error.Type"),
+            ("(any Swift.Error).Type", "(Error).Type"),
+            ("(any Swift.Error.Type).Type", "Error.Type.Type"),
+            ("any Error.Type", "(any Error).Type"),
+            ("any Swift.Error.Type", "(any Error).Type"),
+            ("Swift.Int.Type", "Type"),
+            ("Swift.Int.Type.Type", "Type.Type"),
+            ("Swift.Int.Type?", "Type?"),
+            ("Box<Outer<Int>.Item>", "Box<Item>"),
+            ("Outer<Int>.Item", "Item"),
+            ("Outer<Int>.Mid.Item", "Mid.Item"),
+            ("Swift.Optional<Outer<Int>.Item>", "Item?"),
+            ("Swift.InlineArray<4, Swift.Int>", "InlineArray<8,Int>"),
+            ("Swift.InlineArray<4, Swift.Int>", "InlineArray<4,String>"),
+            ("(((Int) -> Int)?).Type", "(Int)->Int?.Type"),
+            ("Swift.Optional<some Swift.Error>", "Error?"),
+            ("Swift.Optional<some Swift.Error>?", "Error??"),
+            ("Optional<((Int) -> Int)>", "(Int)->Int?"),
+            ("Swift.Optional<((Int) -> Int)>", "(Int)->Int?"),
+            ("Optional<Int>.Type", "MyModule.Optional<Int>.Type"),
+            ("MyModule.Optional<Int>", "Int?"),
+            ("MyModule.Optional<Int>", "Swift.Optional<Int>"),
+            ("MyModule.Optional<Int>", "Optional<Int>"),
+            ("MyModule.Optional<Int,>", "Optional<Int,>"),
+            ("Box<(repeat each T)>", "Box<repeat each T>"),
+            ("Box<repeat each T>", "Box<(repeat each T)>"),
+            ("Box<(repeat each (T))>", "Box<repeat each T>"),
+            ("Box<repeat each (T)>", "Box<(repeat each T)>"),
+            ("[Swift.Int].Index", "Index"),
+            ("any ~(any Copyable)", "any ~(any Copyable)"),
+            ("any ~(some Copyable)", "any ~(some Copyable)"),
+            ("any (any P).Item", "any (any P).Item"),
+            ("any ~(any P).Item", "any ~(any P).Item"),
+            ("some (some Error)", "some (some Error)"),
+            ("some (any Error)", "some (any Error)"),
+            ("some Swift.Error.Type", "some Error.Type"),
+            ("some [Int]", "some [Int]"),
+            ("some [String: Int]", "some [String: Int]"),
+            ("some Collection<Swift.Int>", "Collection<Int>"),
+            ("@Sendable nonisolated(nonsending) () -> Int", "@Sendable () -> Int"),
+            ("@Example(1 + +2) () -> Void", "@Example(1 ++ 2) () -> Void"),
+            ("() -> Int?", "() throws -> Int?"),
+            ("() throws(Swift.Error) -> Void", "() throws -> Void"),
+            ("(a: Int, b: Int)", "(x:Int,b:Int)"),
+            ("()", "any ()"),
+            ("[Int]", "any [Int]"),
+            ("Equatable & Sendable?", "any (Equatable & Sendable?)"),
+            ("(any P & Q).Type", "(any ((any P) & Q)).Type"),
+            ("any P & Q", "(any P) & Q"),
+            ("(any P) & Q", "(any P) & Q"),
+            ("any P & (any Q & R)", "any P & Q & R"),
+            ("any P & Q & R", "any P & (any Q & R)"),
+            ("P.Protocol", "any P.Protocol"),
+            ("any P.Protocol", "P.Protocol"),
+            ("any P.Protocol", "any P.Protocol"),
+            ("any (P.Protocol).Type", "any (P.Protocol).Type"),
+            ("(some P) & Q", "(some P) & Q"),
+            ("P & ~(any Q)", "P & ~(any Q)"),
+            ("P & ~(some Q)", "P & ~(some Q)"),
+            ("~(any Q)", "~(any Q)"),
+            ("(Swift).Optional<Int>.Marker", "Int?.Marker"),
+            ("(Swift).Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
+            ("(Swift).Optional<Int>", "Int?"),
+            ("Box<MyModule.Optional<Int>>", "Box<Optional<Int>>"),
+            ("MyModule.Optional<Int>.Type", "Optional<Int>.Type"),
+            ("MyModule.Optional<Int>?", "Optional<Int>?"),
+            ("Namespace.Swift.Optional<Int>", "Swift.Optional<Int>"),
+            ("Namespace.Swift.Optional<Int>", "Optional<Int>"),
+            ("Box<Namespace.Swift.Optional<Int>>", "Box<Swift.Optional<Int>>"),
+            ("Namespace.Swift.Optional<Int>.Type", "Swift.Optional<Int>.Type"),
+            ("Namespace.Swift.Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
+            ("MyModule.Optional<Int>.Marker", "Optional<Int>.Marker"),
+            ("Shapes.Optional<4>", "Optional<8>"),
+            ("Shapes.Optional<4>", "Int?"),
+            ("[4 of Swift.Int]", "[8 of Int]"),
+            ("[4 of Outer<Int>.Item]", "[4 of Item]"),
+            ("[4 of some Swift.Error]", "[4 of Error]"),
+            ("(any Swift.Equatable & Swift.Sendable).Type", "(any (any Equatable & Sendable)).Type"),
+            ("(any Swift.Error).Type", "(any (any Error)).Type"),
+            ("[Swift.String: Outer<Int>.Item]", "[String:Item]"),
+            ("[some Swift.Error]", "[Error]"),
+            ("(any Error)?", "any Error?"),
+            ("(any Error)?", "any Error? "),
+            ("Swift.Optional<any Error>", "any Error?"),
+            ("Swift.Optional<any Error>?", "any Error??"),
+            ("(any Swift.Error)!", "any Error!"),
+            ("(any Swift.Error)!", "any Error! "),
+            ("some Error", "any Error"),
+            ("Error", "any (any Error)"),
+            ("Error", "any ((any Error))"),
+            ("Int?", "MyModule.Optional<Int>"),
+            ("Optional<Int>", "MyModule.Optional<Int>"),
+            ("some Swift.Equatable & Swift.Sendable", "Equatable&Sendable"),
+            ("(any Swift.Equatable & Swift.Sendable)?", "Equatable&Sendable?"),
+            ("(any Swift.Equatable & Swift.Sendable)!", "Equatable&Sendable!"),
+            ("(any Swift.Equatable & Swift.Sendable).Type", "any Equatable&Sendable.Type"),
+            ("(any Swift.Equatable & Swift.Sendable).Type", "Equatable&Sendable.Type"),
+            ("(Swift.Equatable & Swift.Sendable).Type", "Equatable&Sendable.Type"),
+            ("any Swift.Equatable & Outer<Int>.Item", "Equatable&Item"),
+            ("(some Swift.Error)?", "Optional<Error>"),
+            ("(some Swift.Error)?", "Swift.Optional<Error>"),
+            ("Swift.Int.Protocol", "Protocol"),
+            ("((Int) -> Swift.Int).Type", "(Int)->Swift.Int.Type"),
+            ("((Int) -> Int)?", "(Int)->Int?"),
+            ("((Int) -> Int)!", "(Int)->Int!"),
+            ("Optional<some Swift.Error>", "Error?"),
             ("Bool", "Bool?"),
             ("(Int, Int)", "Int"),
             ("Int", "Float"),
@@ -77,7 +349,25 @@ struct MacroDeclarationQueriesTests {
         ]
     )
     func typeMatchingRejectsDistinctSpellings(actual: String, expected: String) {
+        _ = parseType(expected)
         #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
+    }
+
+    @Test(
+        "Type matching rejects malformed actual or expected syntax",
+        arguments: [
+            ("[Int", "[Int]"),
+            ("Int", "Int Float"),
+            ("Int", ""),
+            ("Int", "Int\nFloat"),
+            ("Int", "[Int"),
+            ("Error", "any any Error"),
+            ("(value: Int) -> Void", "(Int) -> Void"),
+            ("(Int) -> Void", "(value: Int) -> Void"),
+        ]
+    )
+    func typeMatchingRejectsMalformedSyntax(actual: String, expected: String) {
+        #expect(!typeMatches(parseRawType(actual), expectedTypeName: expected))
     }
 
     @Test("Existential markers normalize while opaque markers remain distinct")
@@ -85,6 +375,127 @@ struct MacroDeclarationQueriesTests {
         #expect(typeMatches(parseType("any Error"), expectedTypeName: "Error"))
         #expect(!typeMatches(parseType("some Error"), expectedTypeName: "Error"))
     }
+
+    @Test("Deeply nested Optional and composition trees match structurally")
+    func deeplyNestedOptionalAndCompositionTreesMatchStructurally() {
+        let depth = 24
+        let actualOptional = String(repeating: "Optional<", count: depth) + "Int" + String(repeating: ">", count: depth)
+        let expectedOptional = String(repeating: "Optional<", count: depth) + "String" + String(repeating: ">", count: depth)
+
+        #expect(!typeMatches(parseType(actualOptional), expectedTypeName: expectedOptional))
+
+        let compositionDepth = 16
+        let nestedComposition = (0..<compositionDepth).reversed().reduce("Leaf") { acc, index in
+            "P\(index) & (\(acc))"
+        }
+        let mismatchedComposition = (0..<compositionDepth).reversed().reduce("OtherLeaf") { acc, index in
+            "P\(index) & (\(acc))"
+        }
+
+        #expect(typeMatches(parseType(nestedComposition), expectedTypeName: nestedComposition))
+        #expect(!typeMatches(parseType(nestedComposition), expectedTypeName: mismatchedComposition))
+    }
+
+    @Test("Synthetic element-level inout markers match equivalent inout function types and reject unmarked types")
+    func syntheticElementInoutMarkersMatchEquivalentInoutTypes() {
+        let inoutParameter = TupleTypeElementSyntax(
+            inoutKeyword: .keyword(.inout, trailingTrivia: .space),
+            type: IdentifierTypeSyntax(name: .identifier("Int"))
+        )
+        let syntheticFunction = TypeSyntax(
+            FunctionTypeSyntax(
+                parameters: TupleTypeElementListSyntax([inoutParameter]),
+                returnClause: ReturnClauseSyntax(type: IdentifierTypeSyntax(name: .identifier("Void")))
+            )
+        )
+        let syntheticSingleTuple = TypeSyntax(
+            TupleTypeSyntax(elements: TupleTypeElementListSyntax([inoutParameter]))
+        )
+
+        let qualifiedInoutParameter = TupleTypeElementSyntax(
+            inoutKeyword: .keyword(.inout, trailingTrivia: .space),
+            type: MemberTypeSyntax(
+                baseType: IdentifierTypeSyntax(name: .identifier("Swift")),
+                name: .identifier("Int")
+            )
+        )
+        let syntheticQualifiedFunction = TypeSyntax(
+            FunctionTypeSyntax(
+                parameters: TupleTypeElementListSyntax([qualifiedInoutParameter]),
+                returnClause: ReturnClauseSyntax(type: IdentifierTypeSyntax(name: .identifier("Void")))
+            )
+        )
+
+        let attributedInoutParameter = TupleTypeElementSyntax(
+            inoutKeyword: .keyword(.inout, trailingTrivia: .space),
+            type: parseType("@Sendable () -> Swift.Int")
+        )
+        let syntheticAttributedFunction = TypeSyntax(
+            FunctionTypeSyntax(
+                parameters: TupleTypeElementListSyntax([attributedInoutParameter]),
+                returnClause: ReturnClauseSyntax(type: IdentifierTypeSyntax(name: .identifier("Void")))
+            )
+        )
+
+        #expect(typeMatches(syntheticFunction, expectedTypeName: "(inout Int) -> Void"))
+        #expect(typeMatches(syntheticFunction, expectedTypeName: "(_ value: inout Int) -> Void"))
+        #expect(typeMatches(syntheticQualifiedFunction, expectedTypeName: "(_ value: inout Int) -> Void"))
+        #expect(typeMatches(syntheticAttributedFunction, expectedTypeName: "(_ value: inout @Sendable () -> Int) -> Void"))
+        #expect(!typeMatches(syntheticAttributedFunction, expectedTypeName: "(@Sendable () -> Int) -> Void"))
+        #expect(!typeMatches(syntheticFunction, expectedTypeName: "(Int) -> Void"))
+        #expect(!typeMatches(syntheticSingleTuple, expectedTypeName: "Int"))
+    }
+
+    #if canImport(SwiftSyntax603)
+    @Test(
+        "Module selectors match qualification and preserve custom Optional isolation",
+        arguments: [
+            ("Swift::Int", "Int", true),
+            ("Swift::Int", "Swift.Int", true),
+            ("Swift.Int", "Swift::Int", true),
+            ("Swift::Unicode.Scalar", "Scalar", true),
+            ("Swift::Unicode.Scalar", "Swift.Unicode.Scalar", true),
+            ("Swift.Unicode.Scalar", "Swift::Unicode.Scalar", true),
+            ("Namespace.Swift.Int", "Swift::Int", false),
+            ("Outer.Probe::Item", "Probe::Item", false),
+            ("Outer.Probe::Item", "Outer.Probe::Item", true),
+            ("MyModule::Error", "Error", true),
+            ("Swift::Optional<Int>", "Int?", true),
+            ("Swift::Optional<Int>", "Optional<Int>", true),
+            ("Swift::Optional<Int>", "Swift.Optional<Int>", true),
+            ("Swift::Optional<Int>.Marker", "Optional<Int>.Marker", true),
+            ("Swift::Optional<Int>.Marker", "(Optional<Int>).Marker", true),
+            ("(Optional<Int>).Marker", "Swift::Optional<Int>.Marker", true),
+            ("(Swift).Optional<Int>.Marker", "Swift::Optional<Int>.Marker", false),
+            ("Swift::Optional<Int>.Marker", "(Swift).Optional<Int>.Marker", false),
+            ("Swift::Optional<Int>.Marker", "Int?.Marker", true),
+            ("Optional<Int>.Marker", "Swift::Optional<Int>.Marker", true),
+            ("MyModule::Optional<Int>", "Optional<Int>", false),
+            ("MyModule::Optional<Int>", "Int?", false),
+            ("MyModule::Optional<Int>.Marker", "Optional<Int>.Marker", false),
+            ("MyModule::Int", "Swift::Int", false),
+            ("[Int].Swift::Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
+            ("Container.Swift::Optional<Int>.Marker", "Container.Optional<Int>.Marker", false),
+            ("[Int].Swift.Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
+            ("Container.Foreign::Owner.Result<Int>", "Result<Int>", false),
+            ("Container.Foreign::Owner.Result<Int>", "Container.Foreign::Owner.Result<Int>", true),
+            ("(Swift).Int", "Swift::Int", false),
+            ("Swift::Int", "(Swift).Int", false),
+            ("Swift::Unicode.Scalar", "(Unicode).Scalar", true),
+            ("Swift::Unicode.Scalar", "(Swift).Unicode.Scalar", false),
+            ("(Swift).Unicode.Scalar", "Swift::Unicode.Scalar", false),
+            ("(Swift::Int).Marker", "Swift::Int.Marker", true),
+        ]
+    )
+    func moduleSelectorsPreserveQualificationAndOptionalIsolation(
+        actual: String,
+        expected: String,
+        shouldMatch: Bool
+    ) {
+        _ = parseType(expected)
+        #expect(typeMatches(parseType(actual), expectedTypeName: expected) == shouldMatch)
+    }
+    #endif
 
     @Test(
         "Instance-variable matching excludes type properties",
@@ -105,8 +516,8 @@ struct MacroDeclarationQueriesTests {
     @Test("Collects every source member namespace")
     func collectsCompleteMemberNames() throws {
         let declaration = try #require(
-            Parser.parse(
-                source: """
+            parseDeclaration(
+                """
                 enum Surface {
                     case idle, active
                     let primary, secondary: Int
@@ -119,8 +530,7 @@ struct MacroDeclarationQueriesTests {
                     typealias Alias = Int
                 }
                 """
-            )
-            .statements.first?.item.as(EnumDeclSyntax.self)
+            )?.as(EnumDeclSyntax.self)
         )
 
         #expect(
@@ -143,16 +553,15 @@ struct MacroDeclarationQueriesTests {
     @Test("Renders payload labels through one enum case pattern boundary")
     func rendersEnumCasePatterns() throws {
         let declaration = try #require(
-            Parser.parse(
-                source: """
+            parseDeclaration(
+                """
                 enum Event {
                     case idle
                     case loaded(String)
                     case progress(seconds: Double, _ marker: Int)
                 }
                 """
-            )
-            .statements.first?.item.as(EnumDeclSyntax.self)
+            )?.as(EnumDeclSyntax.self)
         )
         let elements = declaration.memberBlock.members
             .compactMap { $0.decl.as(EnumCaseDeclSyntax.self) }
@@ -177,6 +586,21 @@ struct MacroDeclarationQueriesTests {
         )
         #expect(parameters.map(enumCaseLabel) == [nil, "seconds", nil])
     }
+
+    @Test("Matches legacy class restriction inherited types only against exact class")
+    func matchesLegacyClassRestrictionInheritedType() throws {
+        let protocolDecl = try #require(
+            parseDeclaration("protocol Legacy: class {}")?.as(ProtocolDeclSyntax.self)
+        )
+        let inheritedType = try #require(
+            protocolDecl.inheritanceClause?.inheritedTypes.first?.type
+        )
+        #expect(inheritedType.is(ClassRestrictionTypeSyntax.self))
+        #expect(typeMatches(inheritedType, expectedTypeName: "class"))
+        #expect(typeMatches(inheritedType, expectedTypeName: "  class\n"))
+        #expect(!typeMatches(inheritedType, expectedTypeName: "AnyObject"))
+        #expect(!typeMatches(parseType("AnyObject"), expectedTypeName: "class"))
+    }
 }
 
 private func parseModifiers(_ source: String) -> DeclModifierListSyntax? {
@@ -194,10 +618,30 @@ private func parseAttributes(_ source: String) -> AttributeListSyntax? {
 }
 
 private func parseDeclaration(_ source: String) -> DeclSyntax? {
-    Parser.parse(source: source).statements.first?.item.as(DeclSyntax.self)
+    let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
+    return sourceFile.statements.first?.item.as(DeclSyntax.self)
 }
 
 private func parseType(_ source: String) -> TypeSyntax {
+    let parsed = parseRawType(source)
+    #expect(!parsed.hasError)
+    #expect(parsed.totalLength.utf8Length == source.utf8.count)
+    return parsed
+}
+
+private func parseTrimmedType(_ source: String) -> TypeSyntax {
+    guard let first = source.firstIndex(where: { !$0.isWhitespace }),
+          let last = source.lastIndex(where: { !$0.isWhitespace })
+    else {
+        Issue.record("Expected non-empty type fixture")
+        return parseRawType(source)
+    }
+    return parseType(String(source[first...last]))
+}
+
+private func parseRawType(_ source: String) -> TypeSyntax {
     var parser = Parser(source)
     return TypeSyntax.parse(from: &parser)
 }

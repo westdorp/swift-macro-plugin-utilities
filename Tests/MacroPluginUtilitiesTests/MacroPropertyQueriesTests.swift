@@ -14,6 +14,7 @@ struct MacroPropertyQueriesTests {
             ("let value: (any Swift.Error)?", "value", "Error?"),
             ("let `repeat`: Swift.Error", "`repeat`", "Error"),
             ("let other: Int, value: Swift.Error", "value", "Error"),
+            ("let items: some Collection<Swift.Int>", "items", "some Collection<Int>"),
         ]
     )
     func storedLetMatchingAcceptsNormalizedTypes(
@@ -21,6 +22,7 @@ struct MacroPropertyQueriesTests {
         name: String,
         type: String
     ) throws {
+        assertValidTypeFixture(type)
         let classDecl = try parseClass("class Target { \(member) }")
 
         #expect(
@@ -51,6 +53,7 @@ struct MacroPropertyQueriesTests {
         name: String,
         type: String
     ) throws {
+        assertValidTypeFixture(type)
         let classDecl = try parseClass("class Target { \(member) }")
 
         #expect(
@@ -150,11 +153,108 @@ struct MacroPropertyQueriesTests {
             ) == expected
         )
     }
+
+    @Test(
+        "Initializer matching preserves qualified metatypes and opaque wrapper boundaries",
+        arguments: [
+            ("init(value: Swift.Int.Type) {}", "Int.Type", true),
+            ("init(value: Swift.Int.Type.Type) {}", "Int.Type.Type", true),
+            ("init(value: Int.Type) {}", "Int.Type", true),
+            ("init(value: Swift.Optional<Int>) {}", "Int?", true),
+            ("init(value: Swift.Optional<Int>) {}", "Swift.Optional<Int>", true),
+            ("init(value: Swift.Optional<Int>) {}", "Optional<Int>", true),
+            ("init(value: Swift.Optional<Int>?) {}", "Swift.Optional<Int>?", true),
+            ("init(value: Swift.Optional<Int>?) {}", "Optional<Int>?", true),
+            ("init(value: Swift.Optional<Int>?) {}", "Int??", true),
+            ("init(value: Optional<Int>.Type) {}", "Optional<Int>.Type", true),
+            ("init(value: Swift.Optional<Int>.Type) {}", "Optional<Int>.Type", true),
+            ("init(value: any P.Type) {}", "P.Type", true),
+            ("init(value: (any P).Type) {}", "P.Type", false),
+            ("init(value: any P.Type) {}", "(any P).Type", false),
+            ("init(value: (Swift.Int).Type) {}", "Int.Type", true),
+            ("init(value: (any Swift.Error).Type) {}", "(any Error).Type", true),
+            ("init(value: (any Swift.Error).Type) {}", "any Error.Type", false),
+            ("init(value: (any Swift.Error).Protocol) {}", "(any Error).Protocol", true),
+            ("init(value: P.Protocol) {}", "any P.Protocol", false),
+            ("init(value: any P & (Q & R)) {}", "any P & Q & R", true),
+            ("init(value: any P & Q & R) {}", "any (P & Q) & R", true),
+            ("init(value: Box<Outer<Int>.Item>) {}", "Box<Item>", false),
+            ("init(value: Module.Outer<Swift.Int>.Item) {}", "Outer<Int>.Item", true),
+            ("init(value: Swift.InlineArray<4, Swift.Int>) {}", "InlineArray<4,Int>", true),
+            ("init(value: Swift.InlineArray<4, Swift.Int>) {}", "InlineArray<8,Int>", false),
+            ("init(value: any Swift.Equatable & Swift.Sendable) {}", "Equatable&Swift.Sendable", true),
+            ("init(value: any Swift.Equatable & Swift.Sendable) {}", "Equatable&Sendable", true),
+            ("init(value: Int?) {}", "Optional<Int>", true),
+            ("init(value: Int?) {}", "Swift.Optional<Int>", true),
+            ("init(value: Int?) {}", "MyModule.Optional<Int>", false),
+            ("init(value: MyModule.Optional<Int>) {}", "Int?", false),
+            ("init(value: MyModule.Optional<Int>) {}", "Optional<Int>", false),
+            ("init(value: MyModule.Optional<Int,>) {}", "Optional<Int,>", false),
+            ("init(value: Int?) {}", "Optional<Int,>", true),
+            ("init(value: Optional<Int>.Marker) {}", "Swift.Optional<Int>.Marker", true),
+            ("init(value: Int?.Marker) {}", "Optional<Int>.Marker", true),
+            ("init(value: () -> Int?) {}", "() -> Swift.Optional<Int>", true),
+            ("init(value: (_ x: Swift.Int) -> Void) {}", "(Int)->Void", true),
+            ("init(value: [Swift.Int].Index) {}", "[Int].Index", true),
+            ("init(value: Box<(repeat each T)>) {}", "Box<repeat each T>", false),
+            ("init(value: (repeat each (T))) {}", "(repeat each T)", true),
+            ("init(value: Box<(repeat each (T))>) {}", "Box<repeat each T>", false),
+            ("init(value: Namespace.Swift.Optional<Int>) {}", "Swift.Optional<Int>", false),
+            ("init(value: Namespace.Swift.Optional<Int>.Marker) {}", "Swift.Optional<Int>.Marker", false),
+            ("init(value: Shapes.Optional<4>) {}", "Optional<4>", true),
+            ("init(value: [4 of Swift.Int]?) {}", "[4 of Int]?", true),
+            ("init(value: Box<[Swift.Int]>) {}", "Box<[Int]>", true),
+            ("init(value: Box<[Int?]>) {}", "Box<[Swift.Optional<Int>]>", true),
+            ("init(value: [Swift.String: Swift.Int?]) {}", "[String:Optional<Int>]", true),
+            ("init(value: (any Error)?) {}", "Swift.Optional<any Error>", true),
+            ("init(value: Swift.Optional<any Error>) {}", "(any Error)?", true),
+            ("init(value: (any Swift.Equatable & Swift.Sendable)?) {}", "Swift.Optional<any Equatable&Sendable>", true),
+            ("init(value: Swift.Int!) {}", "Int!", true),
+            ("init(value: Swift.Int.Type) {}", "Type", false),
+            ("init(value: ((Int) -> Swift.Int).Type) {}", "(Int)->Swift.Int.Type", false),
+            ("init(value: some 🐱) {}", "some🐱", false),
+            ("init(value: Box<some Probe>) {}", "Box<someProbe>", false),
+            ("init(value: borrowing some Probe) {}", "borrowingsomeProbe", false),
+        ]
+    )
+    func initializerMatchingHandlesMetatypesAndOpaqueWrappers(
+        member: String,
+        parameterType: String,
+        expected: Bool
+    ) throws {
+        assertValidTypeFixture(parameterType)
+        let classDecl = try parseClass("class Target { \(member) }")
+
+        #expect(
+            hasConflictingInitializer(
+                parameterLabel: "value",
+                parameterType: parameterType,
+                in: classDecl
+            ) == expected
+        )
+    }
+}
+
+private func assertValidTypeFixture(_ source: String) {
+    guard let first = source.firstIndex(where: { !$0.isWhitespace }),
+          let last = source.lastIndex(where: { !$0.isWhitespace })
+    else {
+        Issue.record("Expected non-empty type fixture")
+        return
+    }
+    let trimmed = String(source[first...last])
+    var parser = Parser(trimmed)
+    let parsed = TypeSyntax.parse(from: &parser)
+    #expect(!parsed.hasError)
+    #expect(parsed.totalLength.utf8Length == trimmed.utf8.count)
 }
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
-    try #require(
-        Parser.parse(source: source)
+    let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
+    return try #require(
+        sourceFile
             .statements.first?
             .item.as(DeclSyntax.self)?
             .as(ClassDeclSyntax.self)

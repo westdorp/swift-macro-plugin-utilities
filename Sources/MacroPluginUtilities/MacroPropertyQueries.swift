@@ -21,6 +21,18 @@ public func hasStoredLetProperty(
     typeNamed typeName: String,
     in classDecl: ClassDeclSyntax
 ) -> Bool {
+    guard let expectedPattern = ExpectedTypePattern(parsing: typeName) else {
+        return false
+    }
+
+    return hasStoredLetProperty(named: propertyName, typePattern: expectedPattern, in: classDecl)
+}
+
+func hasStoredLetProperty(
+    named propertyName: String,
+    typePattern expectedPattern: ExpectedTypePattern,
+    in classDecl: ClassDeclSyntax
+) -> Bool {
     classDecl.memberBlock.members.contains { member in
         guard let variableDecl = member.decl.as(VariableDeclSyntax.self),
               variableDecl.bindingSpecifier.tokenKind == .keyword(.let),
@@ -38,7 +50,7 @@ public func hasStoredLetProperty(
                 return false
             }
 
-            return typeMatches(typeAnnotation.type, expectedTypeName: typeName)
+            return expectedPattern.matches(typeAnnotation.type)
         }
     }
 }
@@ -104,18 +116,35 @@ public func hasConflictingInitializer(
     parameterType: String,
     in classDecl: ClassDeclSyntax
 ) -> Bool {
+    guard let expectedPattern = ExpectedTypePattern(parsing: parameterType) else {
+        return false
+    }
+
+    return hasConflictingInitializer(
+        parameterLabel: parameterLabel,
+        parameterTypePattern: expectedPattern,
+        in: classDecl
+    )
+}
+
+func hasConflictingInitializer(
+    parameterLabel: String,
+    parameterTypePattern expectedPattern: ExpectedTypePattern,
+    in classDecl: ClassDeclSyntax
+) -> Bool {
     classDecl.memberBlock.members.contains { member in
         guard let initializerDecl = member.decl.as(InitializerDeclSyntax.self) else {
             return false
         }
 
         let parameters = initializerDecl.signature.parameterClause.parameters
-        guard parameters.count == 1, let parameter = parameters.first else {
+        guard parameters.count == 1,
+              let parameter = parameters.first,
+              parameter.firstName.text == parameterLabel
+        else {
             return false
         }
 
-        let hasExpectedLabel = parameter.firstName.text == parameterLabel
-        let hasExpectedType = typeMatches(parameter.type, expectedTypeName: parameterType)
-        return hasExpectedLabel && hasExpectedType
+        return expectedPattern.matches(parameter.type)
     }
 }

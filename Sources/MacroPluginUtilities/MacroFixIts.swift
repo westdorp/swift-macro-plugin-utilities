@@ -4,24 +4,18 @@ import SwiftSyntax
 /// Creates a one-change fix-it that inserts `final` without losing trivia.
 public func makeAddFinalFixIt(for classDecl: ClassDeclSyntax, fixItMessage: MacroFixItMessage) -> FixIt {
     var updatedClassDecl = classDecl
+    var classKeyword = classDecl.classKeyword
+    let classLeadingTrivia = classKeyword.leadingTrivia
+    classKeyword.leadingTrivia = []
+    updatedClassDecl.classKeyword = classKeyword
 
-    if classDecl.modifiers.isEmpty {
-        var classKeyword = classDecl.classKeyword
-        let classLeadingTrivia = classKeyword.leadingTrivia
-        classKeyword.leadingTrivia = []
-        updatedClassDecl.classKeyword = classKeyword
-
-        let finalModifier = DeclModifierSyntax(
-            leadingTrivia: classLeadingTrivia,
-            name: .keyword(.final, trailingTrivia: .space)
-        )
-        updatedClassDecl.modifiers = DeclModifierListSyntax([finalModifier])
-    } else {
-        let finalModifier = DeclModifierSyntax(name: .keyword(.final, trailingTrivia: .space))
-        updatedClassDecl.modifiers = DeclModifierListSyntax(
-            Array(classDecl.modifiers) + [finalModifier]
-        )
-    }
+    let finalModifier = DeclModifierSyntax(
+        leadingTrivia: classLeadingTrivia,
+        name: .keyword(.final, trailingTrivia: .space)
+    )
+    updatedClassDecl.modifiers = DeclModifierListSyntax(
+        Array(classDecl.modifiers) + [finalModifier]
+    )
 
     return FixIt(
         message: fixItMessage,

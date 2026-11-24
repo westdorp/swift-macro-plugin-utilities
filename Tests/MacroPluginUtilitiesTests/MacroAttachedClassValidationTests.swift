@@ -32,14 +32,103 @@ struct MacroAttachedClassValidationTests {
     }
 
     @Test(
+        "Accepts final classes with inactive-branch open members or nested open classes",
+        arguments: [
+            "@MainActor public final class Monitor {\n    let player: AVPlayer\n    #if false\n    open func reload() {}\n    #endif\n}",
+            "@MainActor public final class Monitor { let player: AVPlayer; open class Nested {} }",
+        ]
+    )
+    func acceptsFinalClassWithConditionalOpenMembersOrNestedOpenClass(source: String) throws {
+        let validator = MacroAttachedClassValidator(
+            classDeclaration: try parseClass(source),
+            requirements: observerRequirements
+        )
+        let context = BasicMacroExpansionContext(lexicalContext: [])
+
+        #expect(validator.satisfies(.finalClass))
+        #expect(validator.validate(.finalClass, in: context))
+        #expect(context.diagnostics.isEmpty)
+    }
+
+    @Test(
         "Rejects and diagnoses each missing attached-class requirement",
         arguments: [
             MissingRequirement(
                 source: "@MainActor class Monitor { let player: AVPlayer }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Add the 'final' modifier to this class declaration.",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
                 fixItMessages: ["Add 'final' modifier"]
+            ),
+            MissingRequirement(
+                source: "@MainActor open class Monitor { let player: AVPlayer }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot be applied to an 'open' class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', update or remove any subclasses, or remove @Observer.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor open class Monitor { let player: AVPlayer; final class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot be applied to an 'open' class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', update or remove any subclasses, or remove @Observer.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor open final class Monitor { let player: AVPlayer }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot be applied to an 'open' class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public', change any 'open' members to 'public', update or remove any subclasses, or remove both 'final' and @Observer.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; open func reload() {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer requires a final class, but this class contains 'open' member declarations. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor {\n    let player: AVPlayer\n    #if DEBUG\n    open func reload() {}\n    #endif\n}",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer requires a final class, but this class contains 'open' member declarations. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; open func reload() {}; class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer requires a final class, but this class contains 'open' member declarations. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor final class Monitor { let player: AVPlayer; open func reload() {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' so they are valid on a 'final' class.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public final class Monitor { let player: AVPlayer; open func reload() {}; class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public', review nested or local classes, and update any subclassing so they are valid on a 'final' class.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor class Monitor { let player: AVPlayer; class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; open class Nested {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
+                fixItMessages: []
             ),
             MissingRequirement(
                 source: "final class Monitor { let player: AVPlayer }",
@@ -177,6 +266,74 @@ struct MacroAttachedClassValidationTests {
                 == "WHAT: @Tracker requires a stored instance property 'let session: Session'. WHY: Tracking reads the session. HOW: Add 'let session: Session'."
         )
     }
+
+    @Test(
+        "Unparseable configured type fails closed for stored property and initializer availability",
+        arguments: [
+            ("()asyncthrows->Void", "()asyncthrows->Void"),
+            ("class", "class"),
+            ("any P.Protocol", "any P.Protocol"),
+            ("[Int", "[Int"),
+            ("", ""),
+            ("   ", " "),
+        ]
+    )
+    func unparseableConfiguredTypeFailsClosed(
+        configuredType: String,
+        displayedType: String
+    ) throws {
+        let requirements = MacroAttachedClassRequirements(
+            attributeName: "@Handler",
+            exampleClassName: "Runner",
+            lifecycleOwnershipReason: "Runner owns handler state.",
+            mainActorReason: "Runner runs on MainActor.",
+            storedPropertyName: "action",
+            storedPropertyTypeName: configuredType,
+            storedPropertyReason: "Runner invokes the action.",
+            initializerReason: "Runner synthesizes its initializer.",
+            diagnosticDomain: "HandlerMacro",
+            diagnosticIDs: .init(
+                classOnly: "class-only",
+                mainActorRequired: "mainactor-required",
+                storedPropertyRequired: "action-required",
+                initializerConflict: "init-conflict"
+            )
+        )
+        let declaration = try parseClass(
+            """
+            @MainActor
+            final class Runner {
+                let action: () async throws -> Void
+                init(action: () async throws -> Void) { self.action = action }
+            }
+            """
+        )
+        let validator = MacroAttachedClassValidator(
+            classDeclaration: declaration,
+            requirements: requirements
+        )
+        let context = BasicMacroExpansionContext(lexicalContext: [])
+
+        #expect(!hasStoredLetProperty(named: "action", typeNamed: configuredType, in: declaration))
+        #expect(!hasConflictingInitializer(parameterLabel: "action", parameterType: configuredType, in: declaration))
+        #expect(!validator.satisfies(.storedLetProperty))
+        #expect(!validator.satisfies(.initializerAvailability))
+        #expect(!validator.validate([.storedLetProperty, .initializerAvailability], in: context))
+        #expect(
+            context.diagnostics.map(\.diagnosticID)
+                == [
+                    MessageID(domain: "HandlerMacro", id: "action-required"),
+                    MessageID(domain: "HandlerMacro", id: "init-conflict"),
+                ]
+        )
+        #expect(
+            context.diagnostics.map(\.message)
+                == [
+                    "WHAT: @Handler cannot validate stored property 'action' because configured type '\(displayedType)' is not valid Swift type syntax. WHY: Macro requirements must specify parseable Swift type syntax to match declarations safely. HOW: Update the macro's configured storedPropertyTypeName to valid Swift type syntax.",
+                    "WHAT: @Handler cannot validate 'init(action:)' because configured type '\(displayedType)' is not valid Swift type syntax. WHY: Macro requirements must specify parseable Swift type syntax to detect conflicting initializers safely. HOW: Update the macro's configured storedPropertyTypeName to valid Swift type syntax.",
+                ]
+        )
+    }
 }
 
 struct MissingRequirement: Sendable {
@@ -225,6 +382,8 @@ private let trackerRequirements = MacroAttachedClassRequirements(
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
     let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     return try #require(
         sourceFile.statements.compactMap { $0.item.as(ClassDeclSyntax.self) }.first
     )
@@ -232,6 +391,8 @@ private func parseClass(_ source: String) throws -> ClassDeclSyntax {
 
 private func parseStruct(_ source: String) throws -> StructDeclSyntax {
     let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     return try #require(
         sourceFile.statements.compactMap { $0.item.as(StructDeclSyntax.self) }.first
     )
