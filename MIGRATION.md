@@ -1,3 +1,39 @@
+# Unreleased
+
+## Type matching and attached-class validation updates
+
+### Type matching
+
+- `typeMatches` (and its callers `hasStoredLetProperty` and
+  `hasConflictingInitializer`) now preserves a separating space between adjacent
+  word tokens instead of stripping all whitespace. Expected strings for
+  multi-word spellings must include that space (for example `()async throws->Void`,
+  `inout Foo`, `borrowing Foo`, `consuming Foo`, `sending Foo`, and `some Foo`).
+- Qualification matching is now structural rather than a raw string suffix
+  check. Specialized enclosing segments such as `Outer<Int>.Item` no longer
+  match `Item`, and metatype suffixes such as `Swift.Int.Type` /
+  `Swift.Int.Protocol` no longer match bare `Type` / `Protocol`.
+- Optional spellings (`T?`, `Optional<T>`, and `Swift.Optional<T>`) now match
+  symmetrically in both directions, while other module-qualified types named
+  `Optional` (such as `MyModule.Optional<Int>`) no longer match unqualified
+  `Optional<Int>` or `Int?`.
+- Qualified protocol compositions (`any Swift.Equatable & Swift.Sendable`),
+  parenthesized metatype bases (`(Swift.Int).Type`, `(any Swift.Error).Type`),
+  and Swift 6.2 value generic arguments (`Swift.InlineArray<4, Swift.Int>`) now
+  match structurally.
+
+### Attached-class final validation
+
+- `MacroAttachedClassValidator.satisfies(.finalClass)` now rejects classes
+  marked both `open` and `final`.
+- `MacroAttachedClassValidator.validate(.finalClass, in:)` now withholds the
+  automatic `Add 'final' modifier` fix-it for `open` classes, classes with
+  `open` members, and classes containing nested or local class declarations, and
+  updates its fixable `HOW` guidance to remind callers to confirm no external
+  subclasses exist before adding `final`.
+
+---
+
 # Migrating to 0.2.0
 
 ## `0.1.0` adopters
@@ -163,8 +199,10 @@ hasSendableConformance(
 ) -> Bool
 ```
 
-Existing class calls remain unchanged. Struct consumers delete private duplicate
-logic and call:
+Existing class calls remain unchanged. Struct consumers whose private lookup
+matches the same unconditional declaration-list traversal (see
+[Behavior changes without call-site rewrites](#behavior-changes-without-call-site-rewrites)
+for the `#if` limitation) can delete that duplicate logic and call:
 
 ```swift
 hasSendableConformance(

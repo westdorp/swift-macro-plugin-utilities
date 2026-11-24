@@ -35,6 +35,20 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
         return false
     }
 
+    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(expected)
+    if expectedHadParentheses {
+        return typeMatches(type, expectedTypeName: unwrappedExpected)
+    }
+
+    if !expected.hasSuffix("?"),
+       !expected.hasSuffix("!"),
+       let constraintExpected = strippingLeadingAnyKeyword(from: expected) {
+        guard strippingLeadingAnyKeyword(from: constraintExpected) == nil else {
+            return false
+        }
+        return typeMatches(type, expectedTypeName: constraintExpected)
+    }
+
     if let optionalType = type.as(OptionalTypeSyntax.self) {
         return qualifiedOptionalMatches(
             wrappedType: optionalType.wrappedType,
@@ -87,8 +101,9 @@ private func qualifiedOptionalMatches(
 
     let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(rawExpectedWrapped)
     if isSugar,
-       !isPostfixAtomic(unwrapGroupingAndAny(wrappedType)),
-       !expectedHadParentheses {
+       !expectedHadParentheses,
+       !isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
+        || strippingLeadingAnyKeyword(from: unwrappedExpected) != nil {
         return false
     }
 
@@ -138,7 +153,9 @@ private func qualifiedImplicitlyUnwrappedOptionalMatches(
 
     let rawExpectedWrapped = String(expected.dropLast())
     let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(rawExpectedWrapped)
-    guard isPostfixAtomic(unwrapGroupingAndAny(wrappedType)) || expectedHadParentheses else {
+    if !expectedHadParentheses,
+       !isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
+        || strippingLeadingAnyKeyword(from: unwrappedExpected) != nil {
         return false
     }
 
@@ -346,6 +363,15 @@ private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bo
 
     let droppedPrefixCount = astSegments.count - expectedSegments.count
     guard astSegments.prefix(droppedPrefixCount).allSatisfy({ $0.genericClause == nil }) else {
+        return false
+    }
+
+    if expectedSegments.count == 1,
+       expectedSegments[0].name == "Optional",
+       let genericBody = expectedSegments[0].genericBody,
+       let expectedArgs = splitTopLevel(genericBody, separator: ","),
+       expectedArgs.count == 1,
+       optionalWrappedType(type) == nil {
         return false
     }
 

@@ -118,24 +118,54 @@ public struct MacroAttachedClassValidator {
         let className = Syntax(classDeclaration.name)
         switch requirement {
         case .finalClass:
-            let fixIts = [
-                makeAddFinalFixIt(
-                    for: classDeclaration,
-                    fixItMessage: MacroFixItMessage(
-                        "Add 'final' modifier",
-                        domain: requirements.diagnosticDomain
-                    )
+            switch finalClassFixItEligibility(for: classDeclaration) {
+            case .openClass:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.classOnly,
+                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    why: requirements.lifecycleOwnershipReason,
+                    how: "Replace 'open' with 'public final', change any 'open' members to 'public', or remove \(requirements.attributeName)."
                 )
-            ]
-            context.diagnose(
-                className,
-                domain: requirements.diagnosticDomain,
-                id: requirements.diagnosticIDs.classOnly,
-                what: "\(requirements.attributeName) can only be applied to a final class.",
-                why: requirements.lifecycleOwnershipReason,
-                how: "Add the 'final' modifier to this class declaration.",
-                fixIts: fixIts
-            )
+            case .openMembers:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.classOnly,
+                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    why: requirements.lifecycleOwnershipReason,
+                    how: "Change any 'open' members to 'public' before adding 'final'."
+                )
+            case .nestedClasses:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.classOnly,
+                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    why: requirements.lifecycleOwnershipReason,
+                    how: "Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
+                )
+            case .fixable:
+                let fixIts = [
+                    makeAddFinalFixIt(
+                        for: classDeclaration,
+                        fixItMessage: MacroFixItMessage(
+                            "Add 'final' modifier",
+                            domain: requirements.diagnosticDomain
+                        )
+                    )
+                ]
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.classOnly,
+                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    why: requirements.lifecycleOwnershipReason,
+                    how: "Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
+                    fixIts: fixIts
+                )
+            }
         case .mainActorIsolation:
             let fixIts = [
                 makeAddMainActorFixIt(
@@ -194,6 +224,7 @@ public struct MacroAttachedClassValidator {
         switch requirement {
         case .finalClass:
             hasModifier(named: "final", in: classDeclaration.modifiers)
+                && !hasModifier(named: "open", in: classDeclaration.modifiers)
         case .mainActorIsolation:
             hasAttribute(named: "MainActor", in: classDeclaration.attributes)
         case .storedLetProperty:
@@ -215,4 +246,66 @@ public struct MacroAttachedClassValidator {
     public func satisfies(_ requiredContracts: [MacroAttachedClassRequirement]) -> Bool {
         requiredContracts.allSatisfy { satisfies($0) }
     }
+}
+
+private enum FinalClassFixItEligibility {
+    case openClass
+    case openMembers
+    case nestedClasses
+    case fixable
+}
+
+private func finalClassFixItEligibility(
+    for classDeclaration: ClassDeclSyntax
+) -> FinalClassFixItEligibility {
+    if hasModifier(named: "open", in: classDeclaration.modifiers) {
+        return .openClass
+    }
+    if hasOpenMember(in: classDeclaration.memberBlock.members) {
+        return .openMembers
+    }
+    if hasNestedClass(in: classDeclaration.memberBlock) {
+        return .nestedClasses
+    }
+    return .fixable
+}
+
+private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
+    for member in members {
+        if let ifConfig = member.decl.as(IfConfigDeclSyntax.self) {
+            for clause in ifConfig.clauses {
+                if case .decls(let conditionalMembers) = clause.elements,
+                   hasOpenMember(in: conditionalMembers) {
+                    return true
+                }
+            }
+            continue
+        }
+
+        if member.decl.isProtocol(DeclGroupSyntax.self) {
+            continue
+        }
+
+        if let modified = member.decl.asProtocol(WithModifiersSyntax.self),
+           hasModifier(named: "open", in: modified.modifiers) {
+            return true
+        }
+    }
+
+    return false
+}
+
+private func hasNestedClass(in memberBlock: MemberBlockSyntax) -> Bool {
+    final class Finder: SyntaxVisitor {
+        var found = false
+
+        override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
+            found = true
+            return .skipChildren
+        }
+    }
+
+    let finder = Finder(viewMode: .sourceAccurate)
+    finder.walk(memberBlock)
+    return finder.found
 }

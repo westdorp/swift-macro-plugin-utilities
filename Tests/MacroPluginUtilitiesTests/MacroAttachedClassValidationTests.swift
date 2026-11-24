@@ -38,8 +38,50 @@ struct MacroAttachedClassValidationTests {
                 source: "@MainActor class Monitor { let player: AVPlayer }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Add the 'final' modifier to this class declaration.",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
                 fixItMessages: ["Add 'final' modifier"]
+            ),
+            MissingRequirement(
+                source: "@MainActor open class Monitor { let player: AVPlayer }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', or remove @Observer.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor open final class Monitor { let player: AVPlayer }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', or remove @Observer.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; open func reload() {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; #if DEBUG\n open func reload() {}\n #endif }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor class Monitor { let player: AVPlayer; class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; open class Nested {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
+                fixItMessages: []
             ),
             MissingRequirement(
                 source: "final class Monitor { let player: AVPlayer }",
