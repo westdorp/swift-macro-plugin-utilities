@@ -57,9 +57,18 @@ struct MacroDeclarationQueriesTests {
             ("Optional<Int>", "Swift.Optional<Int>"),
             ("MyModule.Optional<Int,>", "MyModule.Optional<Int>"),
             ("Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
+            ("Int?.Marker", "Optional<Int>.Marker"),
+            ("Optional<Int>.Marker", "Int?.Marker"),
+            ("Swift.Int?.Marker", "Swift.Optional<Int>.Marker"),
             ("(Swift.Int, Swift.String)", "(Int,String)"),
             ("(a: Swift.Int, b: Swift.String)", "(a:Int,b:String)"),
+            ("() -> Int?", "() -> Swift.Optional<Int>"),
+            ("() -> Swift.Optional<Int>", "() -> Int?"),
+            ("@Sendable (Swift.Int) async throws(Swift.Error) -> Int?", "@Sendable (Int) async throws(Error) -> Optional<Int>"),
+            ("inout Swift.Optional<Int>", "inout Int?"),
+            ("borrowing Swift.Int", "borrowing Int"),
             ("Error", "any Error"),
+            ("any ~Copyable", "any ~Copyable"),
             ("any P & ~Copyable", "P & ~Copyable"),
             ("any Swift.P & ~Swift.Copyable", "P & ~Copyable"),
             ("Int??", "Optional<Int?>"),
@@ -215,9 +224,11 @@ struct MacroDeclarationQueriesTests {
             ("MyModule.Optional<Int>", "Swift.Optional<Int>"),
             ("MyModule.Optional<Int>", "Optional<Int>"),
             ("MyModule.Optional<Int,>", "Optional<Int,>"),
-            ("MyModule::Optional<Int>", "Optional<Int>"),
-            ("MyModule::Optional<Int>", "Int?"),
-            ("MyModule::Int", "Swift::Int"),
+            ("Box<(repeat each T)>", "Box<repeat each T>"),
+            ("Box<repeat each T>", "Box<(repeat each T)>"),
+            ("[Int", "[Int]"),
+            ("() -> Int?", "() throws -> Int?"),
+            ("() throws(Swift.Error) -> Void", "() throws -> Void"),
             ("(a: Int, b: Int)", "(x:Int,b:Int)"),
             ("()", "any ()"),
             ("[Int]", "any [Int]"),
@@ -296,6 +307,33 @@ struct MacroDeclarationQueriesTests {
 
         #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
     }
+
+    #if canImport(SwiftSyntax603)
+    @Test(
+        "Module selectors match qualification and preserve custom Optional isolation",
+        arguments: [
+            ("Swift::Int", "Int", true),
+            ("MyModule::Error", "Error", true),
+            ("Swift::Optional<Int>", "Int?", true),
+            ("Swift::Optional<Int>", "Optional<Int>", true),
+            ("Swift::Optional<Int>", "Swift.Optional<Int>", true),
+            ("Swift::Optional<Int>.Marker", "Optional<Int>.Marker", true),
+            ("Swift::Optional<Int>.Marker", "Int?.Marker", true),
+            ("Optional<Int>.Marker", "Swift::Optional<Int>.Marker", true),
+            ("MyModule::Optional<Int>", "Optional<Int>", false),
+            ("MyModule::Optional<Int>", "Int?", false),
+            ("MyModule::Optional<Int>.Marker", "Optional<Int>.Marker", false),
+            ("MyModule::Int", "Swift::Int", false),
+        ]
+    )
+    func moduleSelectorsPreserveQualificationAndOptionalIsolation(
+        actual: String,
+        expected: String,
+        shouldMatch: Bool
+    ) {
+        #expect(typeMatches(parseType(actual), expectedTypeName: expected) == shouldMatch)
+    }
+    #endif
 
     @Test(
         "Instance-variable matching excludes type properties",

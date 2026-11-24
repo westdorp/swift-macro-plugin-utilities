@@ -27,7 +27,7 @@ public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String)
 
 /// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
-    guard let expectedType = parseExpectedType(expectedTypeName) else {
+    guard !type.hasError, let expectedType = parseExpectedType(expectedTypeName) else {
         return false
     }
 
@@ -168,17 +168,49 @@ private func typeSyntaxMatches(
     let lhsTuple = lhs.as(TupleTypeSyntax.self)
     let rhsTuple = rhs.as(TupleTypeSyntax.self)
     if lhsTuple != nil || rhsTuple != nil {
-        guard let lhsTuple,
-              let rhsTuple,
-              lhsTuple.elements.count == rhsTuple.elements.count
+        guard let lhsTuple, let rhsTuple else {
+            return false
+        }
+        return tupleElementsMatch(lhsTuple.elements, rhsTuple.elements)
+    }
+
+    let lhsFunction = lhs.as(FunctionTypeSyntax.self)
+    let rhsFunction = rhs.as(FunctionTypeSyntax.self)
+    if lhsFunction != nil || rhsFunction != nil {
+        guard let lhsFunction, let rhsFunction else {
+            return false
+        }
+        return functionTypesMatch(lhsFunction, rhsFunction)
+    }
+
+    let lhsAttributed = lhs.as(AttributedTypeSyntax.self)
+    let rhsAttributed = rhs.as(AttributedTypeSyntax.self)
+    if lhsAttributed != nil || rhsAttributed != nil {
+        guard let lhsAttributed,
+              let rhsAttributed,
+              normalizedTokenText(lhsAttributed.specifiers) == normalizedTokenText(rhsAttributed.specifiers),
+              normalizedTokenText(lhsAttributed.attributes) == normalizedTokenText(rhsAttributed.attributes)
         else {
             return false
         }
-        return zip(lhsTuple.elements, rhsTuple.elements).allSatisfy { lElement, rElement in
-            lElement.firstName?.text == rElement.firstName?.text
-                && lElement.secondName?.text == rElement.secondName?.text
-                && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(
+            lhsAttributed.baseType,
+            rhsAttributed.baseType,
+            allowExistentialUnwrap: allowExistentialUnwrap
+        )
+    }
+
+    let lhsPackExpansion = lhs.as(PackExpansionTypeSyntax.self)
+    let rhsPackExpansion = rhs.as(PackExpansionTypeSyntax.self)
+    if lhsPackExpansion != nil || rhsPackExpansion != nil {
+        guard let lhsPackExpansion, let rhsPackExpansion else {
+            return false
         }
+        return typeSyntaxMatches(
+            lhsPackExpansion.repetitionPattern,
+            rhsPackExpansion.repetitionPattern,
+            allowExistentialUnwrap: true
+        )
     }
 
     let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self)
@@ -202,11 +234,74 @@ private func typeSyntaxMatches(
     return normalizedTokenText(lhs) == normalizedTokenText(rhs)
 }
 
+private func tupleElementsMatch(
+    _ lhs: TupleTypeElementListSyntax,
+    _ rhs: TupleTypeElementListSyntax
+) -> Bool {
+    guard lhs.count == rhs.count else {
+        return false
+    }
+
+    return zip(lhs, rhs).allSatisfy { lElement, rElement in
+        lElement.firstName?.text == rElement.firstName?.text
+            && lElement.secondName?.text == rElement.secondName?.text
+            && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
+            && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
+    }
+}
+
+private func functionTypesMatch(
+    _ lhs: FunctionTypeSyntax,
+    _ rhs: FunctionTypeSyntax
+) -> Bool {
+    guard tupleElementsMatch(lhs.parameters, rhs.parameters),
+          effectSpecifiersMatch(lhs.effectSpecifiers, rhs.effectSpecifiers)
+    else {
+        return false
+    }
+
+    return typeSyntaxMatches(
+        lhs.returnClause.type,
+        rhs.returnClause.type,
+        allowExistentialUnwrap: true
+    )
+}
+
+private func effectSpecifiersMatch(
+    _ lhs: TypeEffectSpecifiersSyntax?,
+    _ rhs: TypeEffectSpecifiersSyntax?
+) -> Bool {
+    guard lhs?.asyncSpecifier?.text == rhs?.asyncSpecifier?.text else {
+        return false
+    }
+
+    switch (lhs?.throwsClause, rhs?.throwsClause) {
+    case (nil, nil):
+        return true
+    case (let lhsThrows?, let rhsThrows?):
+        guard lhsThrows.throwsSpecifier.text == rhsThrows.throwsSpecifier.text else {
+            return false
+        }
+        switch (lhsThrows.type, rhsThrows.type) {
+        case (nil, nil):
+            return true
+        case (let lhsError?, let rhsError?):
+            return typeSyntaxMatches(lhsError, rhsError, allowExistentialUnwrap: true)
+        default:
+            return false
+        }
+    default:
+        return false
+    }
+}
+
 private func unwrapGrouping(_ type: TypeSyntax) -> TypeSyntax {
     if let tupleType = type.as(TupleTypeSyntax.self),
        tupleType.elements.count == 1,
        let element = tupleType.elements.first,
-       element.firstName == nil {
+       element.firstName == nil,
+       element.ellipsis == nil,
+       !element.type.is(PackExpansionTypeSyntax.self) {
         return unwrapGrouping(element.type)
     }
 
@@ -228,13 +323,15 @@ private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
     if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
         return optionalWrappedType(unwrapped) == nil
     }
+    if unwrapped.is(SuppressedTypeSyntax.self) {
+        return true
+    }
     if let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
         return isValidExistentialConstraint(metatype.baseType)
     }
     if let composition = unwrapped.as(CompositionTypeSyntax.self) {
         return composition.elements.allSatisfy { element in
-            unwrapGrouping(element.type).is(SuppressedTypeSyntax.self)
-                || isValidExistentialConstraint(element.type)
+            isValidExistentialConstraint(element.type)
         }
     }
 
@@ -251,7 +348,8 @@ private func standardOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
 
 private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
     if let identifierType = type.as(IdentifierTypeSyntax.self),
-       identifierType.moduleSelector == nil,
+       let selector = moduleSelectorName(of: identifierType) as String??,
+       selector == nil || selector == "Swift",
        identifierType.name.text == "Optional",
        let arguments = identifierType.genericArgumentClause?.arguments,
        arguments.count == 1,
@@ -261,10 +359,10 @@ private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
     }
 
     guard let memberType = type.as(MemberTypeSyntax.self),
-          memberType.moduleSelector == nil,
+          moduleSelectorName(of: memberType) == nil,
           memberType.name.text == "Optional",
           let baseIdentifier = memberType.baseType.as(IdentifierTypeSyntax.self),
-          baseIdentifier.moduleSelector == nil,
+          moduleSelectorName(of: baseIdentifier) == nil,
           baseIdentifier.name.text == "Swift",
           baseIdentifier.genericArgumentClause == nil,
           let arguments = memberType.genericArgumentClause?.arguments,
@@ -278,115 +376,221 @@ private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
     return wrappedType
 }
 
+private func moduleSelectorName(of identifierType: IdentifierTypeSyntax) -> String? {
+    #if canImport(SwiftSyntax603)
+    identifierType.moduleSelector?.moduleName.text
+    #else
+    nil
+    #endif
+}
+
+private func moduleSelectorName(of memberType: MemberTypeSyntax) -> String? {
+    #if canImport(SwiftSyntax603)
+    memberType.moduleSelector?.moduleName.text
+    #else
+    nil
+    #endif
+}
+
+private enum NominalSegmentArguments {
+    case none
+    case syntax(GenericArgumentClauseSyntax)
+    case syntheticOptional(TypeSyntax)
+
+    var isEmpty: Bool {
+        if case .none = self {
+            return true
+        }
+        return false
+    }
+
+    var singleTypeArgument: TypeSyntax? {
+        switch self {
+        case .none:
+            return nil
+        case .syntax(let clause):
+            guard clause.arguments.count == 1,
+                  let argument = clause.arguments.first,
+                  case .type(let type) = argument.argument
+            else {
+                return nil
+            }
+            return type
+        case .syntheticOptional(let wrappedType):
+            return wrappedType
+        }
+    }
+}
+
 private struct NominalASTSegment {
     let moduleSelector: String?
     let name: String
-    let genericClause: GenericArgumentClauseSyntax?
+    let arguments: NominalSegmentArguments
 
     var isUnqualifiedStandardOptional: Bool {
-        guard moduleSelector == nil,
-              name == "Optional",
-              let arguments = genericClause?.arguments,
-              arguments.count == 1,
-              let argument = arguments.first,
-              case .type = argument.argument
-        else {
-            return false
-        }
+        moduleSelector == nil && name == "Optional" && arguments.singleTypeArgument != nil
+    }
 
-        return true
+    var isSwiftQualifiedStandardOptional: Bool {
+        moduleSelector == "Swift" && name == "Optional" && arguments.singleTypeArgument != nil
+    }
+
+    var isStandardOptional: Bool {
+        isUnqualifiedStandardOptional || isSwiftQualifiedStandardOptional
     }
 
     var isPlainSwiftNamespace: Bool {
-        moduleSelector == nil && name == "Swift" && genericClause == nil
+        moduleSelector == nil && name == "Swift" && arguments.isEmpty
     }
 }
 
 private func nominalASTSegments(for type: TypeSyntax) -> [NominalASTSegment]? {
-    if let identifierType = type.as(IdentifierTypeSyntax.self) {
-        return [
-            NominalASTSegment(
-                moduleSelector: identifierType.moduleSelector?.moduleName.text,
-                name: identifierType.name.text,
-                genericClause: identifierType.genericArgumentClause
+    var reversed: [NominalASTSegment] = []
+    var current = type
+
+    while true {
+        if let memberType = current.as(MemberTypeSyntax.self) {
+            reversed.append(
+                NominalASTSegment(
+                    moduleSelector: moduleSelectorName(of: memberType),
+                    name: memberType.name.text,
+                    arguments: memberType.genericArgumentClause.map { .syntax($0) } ?? .none
+                )
             )
-        ]
-    }
-    if let memberType = type.as(MemberTypeSyntax.self),
-       let baseSegments = nominalASTSegments(for: memberType.baseType) {
-        return baseSegments + [
-            NominalASTSegment(
-                moduleSelector: memberType.moduleSelector?.moduleName.text,
-                name: memberType.name.text,
-                genericClause: memberType.genericArgumentClause
+            current = unwrapGrouping(memberType.baseType)
+            continue
+        }
+
+        if let identifierType = current.as(IdentifierTypeSyntax.self) {
+            reversed.append(
+                NominalASTSegment(
+                    moduleSelector: moduleSelectorName(of: identifierType),
+                    name: identifierType.name.text,
+                    arguments: identifierType.genericArgumentClause.map { .syntax($0) } ?? .none
+                )
             )
-        ]
+            reversed.reverse()
+            return reversed
+        }
+
+        if !reversed.isEmpty, let optionalType = current.as(OptionalTypeSyntax.self) {
+            reversed.append(
+                NominalASTSegment(
+                    moduleSelector: nil,
+                    name: "Optional",
+                    arguments: .syntheticOptional(optionalType.wrappedType)
+                )
+            )
+            reversed.reverse()
+            return reversed
+        }
+
+        return nil
     }
-    return nil
+}
+
+private func canonicalizeLeadingStandardOptional(
+    _ segments: [NominalASTSegment]
+) -> [NominalASTSegment] {
+    guard segments.count >= 2,
+          segments[0].isPlainSwiftNamespace,
+          segments[1].isUnqualifiedStandardOptional
+    else {
+        return segments
+    }
+
+    var normalized: [NominalASTSegment] = []
+    normalized.reserveCapacity(segments.count - 1)
+    normalized.append(
+        NominalASTSegment(
+            moduleSelector: "Swift",
+            name: "Optional",
+            arguments: segments[1].arguments
+        )
+    )
+    normalized.append(contentsOf: segments.dropFirst(2))
+    return normalized
 }
 
 private func nominalSegmentsMatch(
-    _ lhsSegments: [NominalASTSegment],
-    _ rhsSegments: [NominalASTSegment]
+    _ rawLHSSegments: [NominalASTSegment],
+    _ rawRHSSegments: [NominalASTSegment]
 ) -> Bool {
-    var expected = rhsSegments[...]
-    if expected.count >= 2,
-       expected[expected.startIndex].isPlainSwiftNamespace,
-       expected[expected.index(after: expected.startIndex)].isUnqualifiedStandardOptional,
-       let firstActual = lhsSegments.first,
-       firstActual.isUnqualifiedStandardOptional {
-        expected = expected.dropFirst()
-    }
+    let lhsSegments = canonicalizeLeadingStandardOptional(rawLHSSegments)
+    let rhsSegments = canonicalizeLeadingStandardOptional(rawRHSSegments)
 
-    guard expected.count <= lhsSegments.count else {
+    guard rhsSegments.count <= lhsSegments.count else {
         return false
     }
 
-    let droppedPrefixCount = lhsSegments.count - expected.count
+    let droppedPrefixCount = lhsSegments.count - rhsSegments.count
     let droppedPrefix = lhsSegments.prefix(droppedPrefixCount)
-    guard droppedPrefix.allSatisfy({ $0.genericClause == nil && $0.moduleSelector == nil }) else {
+    guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty && $0.moduleSelector == nil }) else {
         return false
     }
 
-    if !droppedPrefix.isEmpty {
-        if expected.count >= 2,
-           expected[expected.startIndex].isPlainSwiftNamespace,
-           expected[expected.index(after: expected.startIndex)].isUnqualifiedStandardOptional {
-            return false
-        }
-        if expected[expected.startIndex].isUnqualifiedStandardOptional {
-            guard droppedPrefix.count == 1,
-                  droppedPrefix.first?.isPlainSwiftNamespace == true
-            else {
-                return false
-            }
-        }
+    if !droppedPrefix.isEmpty, rhsSegments[0].isStandardOptional {
+        return false
     }
 
-    for (lhsSegment, rhsSegment) in zip(lhsSegments.suffix(expected.count), expected) {
-        guard lhsSegment.moduleSelector == rhsSegment.moduleSelector,
-              lhsSegment.name == rhsSegment.name
-        else {
+    for (index, (lhsSegment, rhsSegment)) in zip(lhsSegments.suffix(rhsSegments.count), rhsSegments).enumerated() {
+        guard lhsSegment.name == rhsSegment.name else {
             return false
         }
-        switch (lhsSegment.genericClause, rhsSegment.genericClause) {
-        case (nil, nil):
-            continue
-        case (let lhsClause?, let rhsClause?):
-            guard lhsClause.arguments.count == rhsClause.arguments.count else {
-                return false
-            }
-            for (lhsArgument, rhsArgument) in zip(lhsClause.arguments, rhsClause.arguments) {
-                guard genericArgumentMatches(lhsArgument.argument, rhsArgument.argument) else {
+
+        if index == 0 && lhsSegment.isStandardOptional && rhsSegment.isStandardOptional {
+            // Standard Optional matches symmetrically across Optional<T>, Swift.Optional<T>,
+            // Swift::Optional<T>, and T? bases.
+        } else if rhsSegment.moduleSelector == nil {
+            if rhsSegment.isUnqualifiedStandardOptional {
+                guard lhsSegment.moduleSelector == nil || lhsSegment.moduleSelector == "Swift" else {
                     return false
                 }
             }
-        default:
+        } else {
+            guard lhsSegment.moduleSelector == rhsSegment.moduleSelector else {
+                return false
+            }
+        }
+
+        guard nominalSegmentArgumentsMatch(lhsSegment.arguments, rhsSegment.arguments) else {
             return false
         }
     }
 
     return true
+}
+
+private func nominalSegmentArgumentsMatch(
+    _ lhs: NominalSegmentArguments,
+    _ rhs: NominalSegmentArguments
+) -> Bool {
+    switch (lhs, rhs) {
+    case (.none, .none):
+        return true
+    case (.syntax(let lhsClause), .syntax(let rhsClause)):
+        guard lhsClause.arguments.count == rhsClause.arguments.count else {
+            return false
+        }
+        for (lhsArgument, rhsArgument) in zip(lhsClause.arguments, rhsClause.arguments) {
+            guard genericArgumentMatches(lhsArgument.argument, rhsArgument.argument) else {
+                return false
+            }
+        }
+        return true
+    case (.syntheticOptional(let lhsWrapped), _):
+        guard let rhsWrapped = rhs.singleTypeArgument else {
+            return false
+        }
+        return typeSyntaxMatches(lhsWrapped, rhsWrapped, allowExistentialUnwrap: true)
+    case (_, .syntheticOptional(let rhsWrapped)):
+        guard let lhsWrapped = lhs.singleTypeArgument else {
+            return false
+        }
+        return typeSyntaxMatches(lhsWrapped, rhsWrapped, allowExistentialUnwrap: true)
+    default:
+        return false
+    }
 }
 
 private func genericArgumentMatches(
