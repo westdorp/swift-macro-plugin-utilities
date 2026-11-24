@@ -200,10 +200,9 @@ runtime code or set downstream app deployment targets.
 
 ## Downstream ownership changes
 
-NetworkExtensionMacros B4 should delete
-`ProviderConfigurationMacro+GenerationSendable.swift`'s private
-traversal/query implementation and call the package function with its
-`StructDeclSyntax`.
+Struct macro consumers can delete any private `Sendable` traversal or query
+implementation and call `hasSendableConformance(in:lexicalContext:)` directly
+with their `StructDeclSyntax`.
 
-PlaybackStateMachineMacros consumers keep their existing direct class calls and
-remove ownership of the vendored sources when they adopt the package.
+Class macro consumers keep their existing direct class calls and remove
+ownership of any vendored utility sources when they adopt the package.

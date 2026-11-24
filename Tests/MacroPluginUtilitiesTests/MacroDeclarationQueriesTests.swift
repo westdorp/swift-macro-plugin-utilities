@@ -56,6 +56,7 @@ struct MacroDeclarationQueriesTests {
             ("Optional<any Error>", "Error?"),
             ("AVPlayer.TimeControlStatus", "AVPlayer.TimeControlStatus"),
             ("External.Error", "Error"),
+            ("someModule.Error", "Error"),
             ("Dictionary < String, Int >", "Dictionary<String,Int>"),
         ]
     )
@@ -67,6 +68,9 @@ struct MacroDeclarationQueriesTests {
         "Type matching rejects distinct and deceptive spellings",
         arguments: [
             ("some Error", "Error"),
+            ("some Swift.Error", "Error"),
+            ("(some Swift.Error)?", "Error?"),
+            ("Optional<some Swift.Error>", "Error?"),
             ("Bool", "Bool?"),
             ("(Int, Int)", "Int"),
             ("Int", "Float"),

@@ -48,8 +48,24 @@ struct RequireFinalMacroTests {
                 "@RequireFinal\npublic /* keep */ final class Session {}\n"
             ),
             (
+                "@RequireFinal\npublic\nclass Session {}\n",
+                "@RequireFinal\npublic\nfinal class Session {}\n"
+            ),
+            (
+                "@RequireFinal\npublic // keep\n    class Session {}\n",
+                "@RequireFinal\npublic // keep\n    final class Session {}\n"
+            ),
+            (
+                "// café — naïve\n@RequireFinal\nclass Session {}\n",
+                "// café — naïve\n@RequireFinal\nfinal class Session {}\n"
+            ),
+            (
                 "enum Scope {\n    @RequireFinal\n    class Session {}\n}\n",
                 "enum Scope {\n    @RequireFinal\n    final class Session {}\n}\n"
+            ),
+            (
+                "@RequireFinal\npublic class Session {\n    open class Nested {}\n}\n",
+                "@RequireFinal\npublic final class Session {\n    open class Nested {}\n}\n"
             ),
         ]
     )
@@ -86,7 +102,7 @@ struct RequireFinalMacroTests {
         )
 
         let fixedSource = try #require(applying(fixIt, in: result))
-        #expect(fixedSource == expectedFixedSource)
+        #expect(Array(fixedSource.utf8) == Array(expectedFixedSource.utf8))
 
         let reexpanded = expand(fixedSource)
         #expect(reexpanded.diagnostics.isEmpty)
@@ -108,7 +124,46 @@ struct RequireFinalMacroTests {
         #expect(diagnostic.diagMessage.severity == .error)
         #expect(
             diagnostic.message
-                == "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public final', or remove @RequireFinal."
+                == "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', or remove @RequireFinal."
+        )
+        #expect(diagnostic.fixIts.isEmpty)
+    }
+
+    @Test(
+        "Class with open members suppresses single-modifier fix-it",
+        arguments: [
+            """
+            @RequireFinal
+            public class Session {
+                open func configure() {}
+            }
+            """,
+            """
+            @RequireFinal
+            public class Session {
+                #if DEBUG
+                open var value: Int { 0 }
+                #endif
+            }
+            """,
+        ]
+    )
+    func classWithOpenMembersSuppressesSingleModifierFixIt(source: String) throws {
+        let result = expand(source)
+        #expect(result.diagnostics.count == 1)
+
+        let diagnostic = try #require(result.diagnostics.first)
+        #expect(
+            diagnostic.diagnosticID
+                == MessageID(
+                    domain: RequireFinalMacro.diagnosticDomain,
+                    id: RequireFinalDiagnosticID.openMembers.rawValue
+                )
+        )
+        #expect(diagnostic.diagMessage.severity == .error)
+        #expect(
+            diagnostic.message
+                == "WHAT: @RequireFinal requires a final class, but this class declares 'open' members. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change the 'open' members to 'public' and add the 'final' modifier to this class declaration."
         )
         #expect(diagnostic.fixIts.isEmpty)
     }
@@ -119,6 +174,7 @@ struct RequireFinalMacroTests {
             "@RequireFinal\nstruct Session {}\n",
             "@RequireFinal\nenum Session {}\n",
             "@RequireFinal\nactor Session {}\n",
+            "class Session {}\n@RequireFinal\nextension Session {}\n",
         ]
     )
     func nonClassDeclarationEmitsClassOnlyDiagnostic(source: String) throws {
@@ -140,6 +196,31 @@ struct RequireFinalMacroTests {
         )
         #expect(diagnostic.fixIts.isEmpty)
     }
+
+    @Test("Fix-it applier rejects an edit anchored to an unregistered syntax tree")
+    func fixItApplierRejectsUnmappedAnchor() throws {
+        let result = expand("@RequireFinal\nclass Session {}\n")
+        let unmappedTree = Parser.parse(source: "@RequireFinal\nclass Session {}\n")
+        let unmappedClass = try #require(
+            unmappedTree.statements.first?.item.as(ClassDeclSyntax.self)
+        )
+        let unmappedFixIt = FixIt(
+            message: UnmappedFixItMessage(),
+            changes: [
+                .replace(
+                    oldNode: Syntax(unmappedClass),
+                    newNode: Syntax(unmappedClass)
+                )
+            ]
+        )
+
+        #expect(applying(unmappedFixIt, in: result) == nil)
+    }
+}
+
+private struct UnmappedFixItMessage: FixItMessage {
+    let message = "Unmapped"
+    let fixItID = MessageID(domain: "RequireFinalMacroTests", id: "unmapped")
 }
 
 private struct ExpansionResult {
@@ -168,9 +249,18 @@ private func expand(_ source: String) -> ExpansionResult {
 }
 
 private func applying(_ fixIt: FixIt, in result: ExpansionResult) -> String? {
+    var bytes = Array(result.sourceFile.description.utf8)
     var edits: [(range: Range<Int>, replacement: String)] = []
+
     for change in fixIt.changes {
         guard case .replace(let oldNode, let newNode) = change else {
+            return nil
+        }
+        guard result.context.location(
+            of: oldNode,
+            at: .beforeLeadingTrivia,
+            filePathMode: .filePath
+        ) != nil else {
             return nil
         }
         let start = result.context.location(
@@ -183,12 +273,19 @@ private func applying(_ fixIt: FixIt, in result: ExpansionResult) -> String? {
             anchoredAt: oldNode,
             fileName: "Example.swift"
         )
+        guard start.offset >= 0, start.offset <= end.offset, end.offset <= bytes.count else {
+            return nil
+        }
         edits.append((range: start.offset..<end.offset, replacement: newNode.description))
     }
 
-    var bytes = Array(result.sourceFile.description.utf8)
+    var previousLowerBound = bytes.count
     for edit in edits.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
+        guard edit.range.upperBound <= previousLowerBound else {
+            return nil
+        }
         bytes.replaceSubrange(edit.range, with: Array(edit.replacement.utf8))
+        previousLowerBound = edit.range.lowerBound
     }
     return String(decoding: bytes, as: UTF8.self)
 }

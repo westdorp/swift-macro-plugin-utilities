@@ -20,32 +20,33 @@ swift-network-extension-macros        (@ProviderConfiguration, @TunnelStateMachi
 
 ## Quick start
 
-Add the package dependency to `Package.swift`:
+Requires Swift 6.2 or later on macOS 13 or later. Add the package dependency to `Package.swift`:
 
 ```swift
 .package(url: "https://github.com/westdorp/swift-macro-plugin-utilities.git", .upToNextMinor(from: "0.7.0"))
 ```
 
-Add the `MacroPluginUtilities` product to your macro target:
+Add `MacroPluginUtilities` to your `.macro` target dependencies:
 
 ```swift
 .product(name: "MacroPluginUtilities", package: "swift-macro-plugin-utilities")
 ```
 
-If another dependency already exposes a `MacroPluginUtilities` module, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` in your target dependencies.
+If another dependency already exposes `MacroPluginUtilities`, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` and write `import PluginUtilities` in your macro target.
 
-Write an attached macro that checks a syntactic contract and emits one structured diagnostic with a deterministic fix-it:
+Define an attached peer macro, register it in your `CompilerPlugin`, and declare `@RequireFinal` in your library target:
 
 ```swift
+// RequireFinalMacros target
 import MacroPluginUtilities
+import SwiftCompilerPlugin
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-public struct RequireFinalMacro: MemberMacro {
+public struct RequireFinalMacro: PeerMacro {
     public static func expansion(
         of node: AttributeSyntax,
-        providingMembersOf declaration: some DeclGroupSyntax,
-        conformingTo protocols: [TypeSyntax],
+        providingPeersOf declaration: some DeclSyntaxProtocol,
         in context: some MacroExpansionContext
     ) -> [DeclSyntax] {
         guard let classDecl = declaration.as(ClassDeclSyntax.self),
@@ -65,6 +66,13 @@ public struct RequireFinalMacro: MemberMacro {
         return []
     }
 }
+
+@main struct RequireFinalPlugin: CompilerPlugin {
+    let providingMacros: [Macro.Type] = [RequireFinalMacro.self]
+}
+
+// RequireFinal library target
+@attached(peer) public macro RequireFinal() = #externalMacro(module: "RequireFinalMacros", type: "RequireFinalMacro")
 ```
 
 Attaching `@RequireFinal` to `class Session {}` produces:
@@ -74,7 +82,7 @@ error: WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass 
 fix-it: Add 'final' modifier -> final class Session {}
 ```
 
-See [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample) for the complete runnable package, including `open`-class and non-class handling plus fix-it application tests.
+To see this live, run `swift test --package-path Examples/DiagnosticFixItExample`, or remove `final` from `Session` in [`Examples/DiagnosticFixItExample/Sources/DiagnosticFixItExample/main.swift`](Examples/DiagnosticFixItExample/Sources/DiagnosticFixItExample/main.swift) and run `swift build --package-path Examples/DiagnosticFixItExample`.
 
 ## Diagnostic contract
 
