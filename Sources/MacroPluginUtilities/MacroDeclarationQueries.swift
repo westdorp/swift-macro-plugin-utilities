@@ -36,41 +36,21 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
     }
 
     if let optionalType = type.as(OptionalTypeSyntax.self) {
-        guard expected.hasSuffix("?"),
-              isPostfixAtomic(unwrapGroupingAndAny(optionalType.wrappedType))
-        else {
-            return false
-        }
-        return qualifiedTypeMatches(
-            optionalType.wrappedType,
-            expected: String(expected.dropLast())
+        return qualifiedOptionalMatches(
+            wrappedType: optionalType.wrappedType,
+            expected: expected
         )
     }
 
     if let wrappedType = optionalWrappedType(type) {
-        if qualifiedNominalMatches(type, expected: expected) {
-            return true
-        }
-        guard expected.hasSuffix("?"),
-              isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
-        else {
-            return false
-        }
-        return qualifiedTypeMatches(
-            wrappedType,
-            expected: String(expected.dropLast())
-        )
+        return qualifiedNominalMatches(type, expected: expected)
+            || qualifiedOptionalMatches(wrappedType: wrappedType, expected: expected)
     }
 
     if let iuoType = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
-        guard expected.hasSuffix("!"),
-              isPostfixAtomic(unwrapGroupingAndAny(iuoType.wrappedType))
-        else {
-            return false
-        }
-        return qualifiedTypeMatches(
-            iuoType.wrappedType,
-            expected: String(expected.dropLast())
+        return qualifiedImplicitlyUnwrappedOptionalMatches(
+            wrappedType: iuoType.wrappedType,
+            expected: expected
         )
     }
 
@@ -86,11 +66,102 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
         return qualifiedTypeMatches(someOrAnyType.constraint, expected: expected)
     }
 
+    if let composition = type.as(CompositionTypeSyntax.self) {
+        return qualifiedCompositionMatches(composition, expected: expected)
+    }
+
     if let metatype = type.as(MetatypeTypeSyntax.self) {
         return qualifiedMetatypeMatches(metatype, expected: expected)
     }
 
     return qualifiedNominalMatches(type, expected: expected)
+}
+
+private func qualifiedOptionalMatches(
+    wrappedType: TypeSyntax,
+    expected: String
+) -> Bool {
+    guard let (rawExpectedWrapped, isSugar) = expectedOptionalWrapped(expected) else {
+        return false
+    }
+
+    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(rawExpectedWrapped)
+    if isSugar,
+       !isPostfixAtomic(unwrapGroupingAndAny(wrappedType)),
+       !expectedHadParentheses {
+        return false
+    }
+
+    return typeMatches(wrappedType, expectedTypeName: unwrappedExpected)
+}
+
+private func expectedOptionalWrapped(_ expected: String) -> (wrapped: String, isSugar: Bool)? {
+    if expected.hasSuffix("?") {
+        let wrapped = String(expected.dropLast())
+        return wrapped.isEmpty ? nil : (wrapped, true)
+    }
+
+    guard let segments = parseExpectedNominalSegments(expected) else {
+        return nil
+    }
+
+    let genericBody: String?
+    switch segments.count {
+    case 1 where segments[0].name == "Optional":
+        genericBody = segments[0].genericBody
+    case 2 where segments[0].name == "Swift"
+        && segments[0].genericBody == nil
+        && segments[1].name == "Optional":
+        genericBody = segments[1].genericBody
+    default:
+        return nil
+    }
+
+    guard let genericBody,
+          let arguments = splitTopLevel(genericBody, separator: ","),
+          arguments.count == 1,
+          let wrapped = arguments.first
+    else {
+        return nil
+    }
+
+    return (wrapped, false)
+}
+
+private func qualifiedImplicitlyUnwrappedOptionalMatches(
+    wrappedType: TypeSyntax,
+    expected: String
+) -> Bool {
+    guard expected.hasSuffix("!") else {
+        return false
+    }
+
+    let rawExpectedWrapped = String(expected.dropLast())
+    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(rawExpectedWrapped)
+    guard isPostfixAtomic(unwrapGroupingAndAny(wrappedType)) || expectedHadParentheses else {
+        return false
+    }
+
+    return typeMatches(wrappedType, expectedTypeName: unwrappedExpected)
+}
+
+private func qualifiedCompositionMatches(
+    _ composition: CompositionTypeSyntax,
+    expected: String
+) -> Bool {
+    guard let expectedElements = splitTopLevel(expected, separator: "&"),
+          composition.elements.count == expectedElements.count
+    else {
+        return false
+    }
+
+    for (astElement, expectedElement) in zip(composition.elements, expectedElements) {
+        guard typeMatches(astElement.type, expectedTypeName: expectedElement) else {
+            return false
+        }
+    }
+
+    return true
 }
 
 private func qualifiedMetatypeMatches(
@@ -116,6 +187,11 @@ private func qualifiedMetatypeBaseMatches(_ base: TypeSyntax, expected: String) 
         else {
             return false
         }
+        let unwrappedConstraint = unwrapGrouping(someOrAnyType.constraint)
+        if let composition = unwrappedConstraint.as(CompositionTypeSyntax.self) {
+            let (innerExpected, _) = stripBalancedOuterParentheses(constraintExpected)
+            return qualifiedCompositionMatches(composition, expected: innerExpected)
+        }
         return qualifiedMetatypeBaseMatches(someOrAnyType.constraint, expected: constraintExpected)
     }
 
@@ -128,42 +204,29 @@ private func qualifiedMetatypeBaseMatches(_ base: TypeSyntax, expected: String) 
         return qualifiedMetatypeMatches(nestedMetatype, expected: unwrappedExpected)
     }
 
-    if let optionalType = unwrappedBase.as(OptionalTypeSyntax.self) {
-        guard unwrappedExpected.hasSuffix("?"),
-              isPostfixAtomic(unwrapGroupingAndAny(optionalType.wrappedType))
-        else {
+    if let composition = unwrappedBase.as(CompositionTypeSyntax.self) {
+        guard expectedHadParentheses else {
             return false
         }
-        return qualifiedTypeMatches(
-            optionalType.wrappedType,
-            expected: String(unwrappedExpected.dropLast())
+        return qualifiedCompositionMatches(composition, expected: unwrappedExpected)
+    }
+
+    if let optionalType = unwrappedBase.as(OptionalTypeSyntax.self) {
+        return qualifiedOptionalMatches(
+            wrappedType: optionalType.wrappedType,
+            expected: unwrappedExpected
         )
     }
 
     if let wrappedType = optionalWrappedType(unwrappedBase) {
-        if qualifiedNominalMatches(unwrappedBase, expected: unwrappedExpected) {
-            return true
-        }
-        guard unwrappedExpected.hasSuffix("?"),
-              isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
-        else {
-            return false
-        }
-        return qualifiedTypeMatches(
-            wrappedType,
-            expected: String(unwrappedExpected.dropLast())
-        )
+        return qualifiedNominalMatches(unwrappedBase, expected: unwrappedExpected)
+            || qualifiedOptionalMatches(wrappedType: wrappedType, expected: unwrappedExpected)
     }
 
     if let iuoType = unwrappedBase.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
-        guard unwrappedExpected.hasSuffix("!"),
-              isPostfixAtomic(unwrapGroupingAndAny(iuoType.wrappedType))
-        else {
-            return false
-        }
-        return qualifiedTypeMatches(
-            iuoType.wrappedType,
-            expected: String(unwrappedExpected.dropLast())
+        return qualifiedImplicitlyUnwrappedOptionalMatches(
+            wrappedType: iuoType.wrappedType,
+            expected: unwrappedExpected
         )
     }
 

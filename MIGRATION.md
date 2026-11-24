@@ -200,9 +200,12 @@ runtime code or set downstream app deployment targets.
 
 ## Downstream ownership changes
 
-Struct macro consumers can delete any private `Sendable` traversal or query
-implementation and call `hasSendableConformance(in:lexicalContext:)` directly
-with their `StructDeclSyntax`.
+Struct macro consumers whose private `Sendable` lookup matches the same
+unconditional declaration-list traversal can delete that private implementation
+and call `hasSendableConformance(in:lexicalContext:)` directly with their
+`StructDeclSyntax`. Consumers that rely on discovering conformances declared
+inside `#if` blocks must handle conditional compilation explicitly, as noted in
+[Behavior changes without call-site rewrites](#behavior-changes-without-call-site-rewrites).
 
 Class macro consumers keep their existing direct class calls and remove
 ownership of any vendored utility sources when they adopt the package.
