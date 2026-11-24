@@ -121,7 +121,7 @@ struct RequireFinalMacroTests {
             ),
             (
                 "@RequireFinal\nopen final class Session {}\n",
-                "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public', change any 'open' members to 'public', update or remove any subclasses, or remove @RequireFinal."
+                "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public', change any 'open' members to 'public', update or remove any subclasses, or remove both 'final' and @RequireFinal."
             ),
         ]
     )

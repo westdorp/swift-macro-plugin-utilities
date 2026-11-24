@@ -121,13 +121,16 @@ public struct MacroAttachedClassValidator {
             switch finalClassFixItEligibility(for: classDeclaration) {
             case .openClass(let alreadyFinal):
                 let replacement = alreadyFinal ? "public" : "public final"
+                let removal = alreadyFinal
+                    ? "remove both 'final' and \(requirements.attributeName)"
+                    : "remove \(requirements.attributeName)"
                 context.diagnose(
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
                     what: "\(requirements.attributeName) can only be applied to a final class.",
                     why: requirements.lifecycleOwnershipReason,
-                    how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or remove \(requirements.attributeName)."
+                    how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
                 )
             case .openMembers:
                 context.diagnose(

@@ -42,13 +42,14 @@ public struct RequireFinalMacro: PeerMacro {
             return []
         case .openClass(let classDecl, let alreadyFinal):
             let replacement = alreadyFinal ? "public" : "public final"
+            let removal = alreadyFinal ? "remove both 'final' and @RequireFinal" : "remove @RequireFinal"
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.openClass,
                 what: "@RequireFinal cannot be applied to an 'open' class.",
                 why: "An 'open' class allows external subclassing, which conflicts with 'final'.",
-                how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or remove @RequireFinal."
+                how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
             )
             return []
         case .classWithOpenMembers(let classDecl):

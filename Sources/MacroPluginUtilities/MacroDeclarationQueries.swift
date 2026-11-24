@@ -259,9 +259,19 @@ private func functionParametersMatch(
     }
 
     return zip(lhs, rhs).allSatisfy { lElement, rElement in
-        (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
+        isValidFunctionParameterLabel(lElement)
+            && isValidFunctionParameterLabel(rElement)
+            && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
             && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
     }
+}
+
+private func isValidFunctionParameterLabel(_ element: TupleTypeElementSyntax) -> Bool {
+    guard let firstName = element.firstName else {
+        return true
+    }
+
+    return firstName.text == "_"
 }
 
 private func functionTypesMatch(
@@ -335,12 +345,10 @@ private func existentialConstraint(of type: TypeSyntax) -> TypeSyntax? {
 private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
     let unwrapped = unwrapGrouping(constraint)
     if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
-        return optionalWrappedType(unwrapped) == nil
+        return isNominalExistentialConstraint(unwrapped)
     }
     if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
-        let operand = unwrapGrouping(suppressed.type)
-        return (operand.is(IdentifierTypeSyntax.self) || operand.is(MemberTypeSyntax.self))
-            && optionalWrappedType(operand) == nil
+        return isNominalExistentialConstraint(suppressed.type)
     }
     if let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
         return isValidExistentialConstraint(metatype.baseType)
@@ -352,6 +360,19 @@ private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
     }
 
     return false
+}
+
+private func isNominalExistentialConstraint(_ type: TypeSyntax) -> Bool {
+    var current = unwrapGrouping(type)
+    guard optionalWrappedType(current) == nil else {
+        return false
+    }
+
+    while let member = current.as(MemberTypeSyntax.self) {
+        current = unwrapGrouping(member.baseType)
+    }
+
+    return current.is(IdentifierTypeSyntax.self)
 }
 
 private func standardOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
@@ -534,6 +555,23 @@ private func memberTypeChainsMatch(
     }
 }
 
+private func expandLeadingModuleSelector(
+    _ segments: [NominalASTSegment]
+) -> (segments: [NominalASTSegment], hadLeadingSelector: Bool) {
+    guard let first = segments.first, let selector = first.moduleSelector else {
+        return (segments, false)
+    }
+
+    var expanded: [NominalASTSegment] = []
+    expanded.reserveCapacity(segments.count + 1)
+    expanded.append(NominalASTSegment(moduleSelector: nil, name: selector, arguments: .none))
+    expanded.append(
+        NominalASTSegment(moduleSelector: nil, name: first.name, arguments: first.arguments)
+    )
+    expanded.append(contentsOf: segments.dropFirst())
+    return (expanded, true)
+}
+
 private func canonicalizeLeadingStandardOptional(
     _ segments: [NominalASTSegment]
 ) -> [NominalASTSegment] {
@@ -561,8 +599,10 @@ private func nominalSegmentsMatch(
     _ rawLHSSegments: [NominalASTSegment],
     _ rawRHSSegments: [NominalASTSegment]
 ) -> Bool {
-    let lhsSegments = canonicalizeLeadingStandardOptional(rawLHSSegments)
-    let rhsSegments = canonicalizeLeadingStandardOptional(rawRHSSegments)
+    let (expandedLHS, _) = expandLeadingModuleSelector(rawLHSSegments)
+    let (expandedRHS, rhsHadLeadingSelector) = expandLeadingModuleSelector(rawRHSSegments)
+    let lhsSegments = canonicalizeLeadingStandardOptional(expandedLHS)
+    let rhsSegments = canonicalizeLeadingStandardOptional(expandedRHS)
 
     guard rhsSegments.count <= lhsSegments.count else {
         return false
@@ -574,7 +614,7 @@ private func nominalSegmentsMatch(
         return false
     }
 
-    if !droppedPrefix.isEmpty, rhsSegments[0].isStandardOptional {
+    if !droppedPrefix.isEmpty, rhsHadLeadingSelector || rhsSegments[0].isStandardOptional {
         return false
     }
 
@@ -589,6 +629,10 @@ private func nominalSegmentsMatch(
         } else if rhsSegment.moduleSelector == nil {
             if rhsSegment.isUnqualifiedStandardOptional {
                 guard lhsSegment.moduleSelector == nil || lhsSegment.moduleSelector == "Swift" else {
+                    return false
+                }
+            } else {
+                guard lhsSegment.moduleSelector == nil else {
                     return false
                 }
             }
