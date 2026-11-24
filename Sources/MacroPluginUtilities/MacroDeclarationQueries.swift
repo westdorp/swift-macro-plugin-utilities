@@ -226,9 +226,9 @@ private func typeSyntaxMatches(
         )
     }
 
-    if let lhsSegments = nominalASTSegments(for: lhs),
-       let rhsSegments = nominalASTSegments(for: rhs) {
-        return nominalSegmentsMatch(lhsSegments, rhsSegments)
+    if let lhsChain = memberTypeChain(for: lhs),
+       let rhsChain = memberTypeChain(for: rhs) {
+        return memberTypeChainsMatch(lhsChain, rhsChain)
     }
 
     return normalizedTokenText(lhs) == normalizedTokenText(rhs)
@@ -250,11 +250,25 @@ private func tupleElementsMatch(
     }
 }
 
+private func functionParametersMatch(
+    _ lhs: TupleTypeElementListSyntax,
+    _ rhs: TupleTypeElementListSyntax
+) -> Bool {
+    guard lhs.count == rhs.count else {
+        return false
+    }
+
+    return zip(lhs, rhs).allSatisfy { lElement, rElement in
+        (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
+            && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
+    }
+}
+
 private func functionTypesMatch(
     _ lhs: FunctionTypeSyntax,
     _ rhs: FunctionTypeSyntax
 ) -> Bool {
-    guard tupleElementsMatch(lhs.parameters, rhs.parameters),
+    guard functionParametersMatch(lhs.parameters, rhs.parameters),
           effectSpecifiersMatch(lhs.effectSpecifiers, rhs.effectSpecifiers)
     else {
         return false
@@ -323,8 +337,10 @@ private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
     if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
         return optionalWrappedType(unwrapped) == nil
     }
-    if unwrapped.is(SuppressedTypeSyntax.self) {
-        return true
+    if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
+        let operand = unwrapGrouping(suppressed.type)
+        return (operand.is(IdentifierTypeSyntax.self) || operand.is(MemberTypeSyntax.self))
+            && optionalWrappedType(operand) == nil
     }
     if let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
         return isValidExistentialConstraint(metatype.baseType)
@@ -444,7 +460,12 @@ private struct NominalASTSegment {
     }
 }
 
-private func nominalASTSegments(for type: TypeSyntax) -> [NominalASTSegment]? {
+private struct MemberTypeChain {
+    let nonNominalBase: TypeSyntax?
+    let segments: [NominalASTSegment]
+}
+
+private func memberTypeChain(for type: TypeSyntax) -> MemberTypeChain? {
     var reversed: [NominalASTSegment] = []
     var current = type
 
@@ -470,7 +491,7 @@ private func nominalASTSegments(for type: TypeSyntax) -> [NominalASTSegment]? {
                 )
             )
             reversed.reverse()
-            return reversed
+            return MemberTypeChain(nonNominalBase: nil, segments: reversed)
         }
 
         if !reversed.isEmpty, let optionalType = current.as(OptionalTypeSyntax.self) {
@@ -482,10 +503,34 @@ private func nominalASTSegments(for type: TypeSyntax) -> [NominalASTSegment]? {
                 )
             )
             reversed.reverse()
-            return reversed
+            return MemberTypeChain(nonNominalBase: nil, segments: reversed)
+        }
+
+        if !reversed.isEmpty {
+            reversed.reverse()
+            return MemberTypeChain(nonNominalBase: current, segments: reversed)
         }
 
         return nil
+    }
+}
+
+private func memberTypeChainsMatch(
+    _ lhs: MemberTypeChain,
+    _ rhs: MemberTypeChain
+) -> Bool {
+    switch (lhs.nonNominalBase, rhs.nonNominalBase) {
+    case (nil, nil):
+        return nominalSegmentsMatch(lhs.segments, rhs.segments)
+    case (let lhsBase?, let rhsBase?):
+        guard lhs.segments.count == rhs.segments.count,
+              typeSyntaxMatches(lhsBase, rhsBase, allowExistentialUnwrap: false)
+        else {
+            return false
+        }
+        return nominalSegmentsMatch(lhs.segments, rhs.segments)
+    default:
+        return false
     }
 }
 
@@ -525,7 +570,7 @@ private func nominalSegmentsMatch(
 
     let droppedPrefixCount = lhsSegments.count - rhsSegments.count
     let droppedPrefix = lhsSegments.prefix(droppedPrefixCount)
-    guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty && $0.moduleSelector == nil }) else {
+    guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty }) else {
         return false
     }
 

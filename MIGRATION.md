@@ -5,10 +5,13 @@
 ### Type matching
 
 - `typeMatches` (and its callers `hasStoredLetProperty` and
-  `hasConflictingInitializer`) now preserves a separating space between adjacent
-  word tokens instead of stripping all whitespace. Expected strings for
-  multi-word spellings must include that space (for example `()async throws->Void`,
-  `inout Foo`, `borrowing Foo`, `consuming Foo`, `sending Foo`, and `some Foo`).
+  `hasConflictingInitializer`) now parses expected type names with `SwiftParser`
+  and rejects actual or expected types containing syntax errors (for example,
+  recovered incomplete spellings such as `[Int` no longer match `[Int`).
+- `typeMatches` now preserves a separating space between adjacent word tokens
+  instead of stripping all whitespace. Expected strings for multi-word spellings
+  must include that space (for example `()async throws->Void`, `inout Foo`,
+  `borrowing Foo`, `consuming Foo`, `sending Foo`, and `some Foo`).
 - Qualification matching is now structural rather than a raw string suffix
   check. Specialized enclosing segments such as `Outer<Int>.Item` no longer
   match `Item`, and metatype suffixes such as `Swift.Int.Type` /
@@ -21,19 +24,27 @@
   `Equatable&Sendable?`).
 - Optional spellings (`T?`, `Optional<T>`, and `Swift.Optional<T>`) now match
   symmetrically in both directions (including trailing-comma specializations
-  such as `Optional<Int,>` and owner segments such as `Optional<Int>.Marker` vs
-  `Swift.Optional<Int>.Marker`), while other module-qualified types named
-  `Optional` (such as `MyModule.Optional<Int>`, `MyModule::Optional<Int>`, and
+  such as `Optional<Int,>` and owner segments such as `Int?.Marker`,
+  `Optional<Int>.Marker`, and `Swift.Optional<Int>.Marker`), while other
+  module-qualified types named `Optional` (such as `MyModule.Optional<Int>` and
   `Namespace.Swift.Optional<Int>`) no longer match unqualified `Optional<Int>`,
-  `Swift.Optional<Int>`, or `Int?`.
+  `Swift.Optional<Int>`, or `Int?`. When built against SwiftSyntax 603 or later,
+  SE-0491 module selectors (`Swift::Optional<Int>`, `Swift::Unicode.Scalar`,
+  `MyModule::Optional<Int>`) follow the same qualification and isolation rules.
 - Expected strings now normalize existential `any` symmetrically with actual
   types (for example `Error` matches `any Error`, and `(any Error)?` matches
   `Swift.Optional<any Error>`), while keeping `(any Error).Type` distinct from
   `any Error.Type` and rejecting malformed or nested `any` constraints (such as
-  `any Error?`, `any (any Error)`, `any ()`, and `(any ((any P) & Q)).Type`).
-- Qualified protocol compositions (`any Swift.Equatable & Swift.Sendable`),
-  tuples (`(Swift.Int, Swift.String)`), array, dictionary, and inline-array
-  element types (`[Swift.Int]`, `[Swift.String: Swift.Int?]`,
+  `any Error?`, `any (any Error)`, `any ~(any Copyable)`, `any ()`, and
+  `(any ((any P) & Q)).Type`).
+- Function types (comparing parameters while ignoring documentation-only
+  parameter labels, `async`/`throws`/typed-`throws` effects, and return types),
+  attributed types (`@Sendable`, `inout`, `borrowing`), pack expansion types
+  (preserving single-element pack tuples such as `Box<(repeat each T)>` distinct
+  from `Box<repeat each T>`), qualified protocol compositions
+  (`any Swift.Equatable & Swift.Sendable`), tuples (`(Swift.Int, Swift.String)`),
+  array, dictionary, and inline-array element types and member chains
+  (`[Swift.Int]`, `[Swift.Int].Index`, `[Swift.String: Swift.Int?]`,
   `[4 of Swift.Int]`), parenthesized metatype bases (`(Swift.Int).Type`,
   `(any Swift.Error).Type`), and Swift 6.2 value generic arguments
   (`Swift.InlineArray<4, Swift.Int>`) now match structurally.

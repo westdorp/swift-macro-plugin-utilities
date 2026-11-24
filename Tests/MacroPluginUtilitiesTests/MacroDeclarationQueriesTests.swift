@@ -179,6 +179,10 @@ struct MacroDeclarationQueriesTests {
             ("[4 of Swift.Int]!", "[4 of Int]!"),
             ("[4 of Swift.Int].Type", "[4 of Int].Type"),
             ("[4 of [2 of Swift.Int]]", "[4 of [2 of Int]]"),
+            ("[Swift.Int].Index", "[Int].Index"),
+            ("[Swift.String: Swift.Int].Index", "[String:Int].Index"),
+            ("[4 of Swift.Int].Index", "[4 of Int].Index"),
+            ("(_ value: Swift.Int) -> Void", "(Int)->Void"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
@@ -227,6 +231,9 @@ struct MacroDeclarationQueriesTests {
             ("Box<(repeat each T)>", "Box<repeat each T>"),
             ("Box<repeat each T>", "Box<(repeat each T)>"),
             ("[Int", "[Int]"),
+            ("[Swift.Int].Index", "Index"),
+            ("any ~(any Copyable)", "any ~(any Copyable)"),
+            ("any ~(some Copyable)", "any ~(some Copyable)"),
             ("() -> Int?", "() throws -> Int?"),
             ("() throws(Swift.Error) -> Void", "() throws -> Void"),
             ("(a: Int, b: Int)", "(x:Int,b:Int)"),
@@ -313,6 +320,7 @@ struct MacroDeclarationQueriesTests {
         "Module selectors match qualification and preserve custom Optional isolation",
         arguments: [
             ("Swift::Int", "Int", true),
+            ("Swift::Unicode.Scalar", "Scalar", true),
             ("MyModule::Error", "Error", true),
             ("Swift::Optional<Int>", "Int?", true),
             ("Swift::Optional<Int>", "Optional<Int>", true),
