@@ -20,36 +20,39 @@ swift-network-extension-macros        (@ProviderConfiguration, @TunnelStateMachi
 
 ## Quick start
 
-Requires Swift 6.2 or later on macOS 13 or later. Add both `swift-macro-plugin-utilities` and `swift-syntax` to `Package.swift`, and wire your macro and library targets (see [`Examples/DiagnosticFixItExample/Package.swift`](Examples/DiagnosticFixItExample/Package.swift)):
+Requires Swift 6.2 or later on macOS 13 or later. Add `import CompilerPluginSupport`, both package dependencies, and the macro and library targets to `Package.swift` (see [`Examples/DiagnosticFixItExample/Package.swift`](Examples/DiagnosticFixItExample/Package.swift)):
 
 ```swift
-dependencies: [
-    .package(url: "https://github.com/westdorp/swift-macro-plugin-utilities.git", .upToNextMinor(from: "0.7.0")),
-    .package(url: "https://github.com/swiftlang/swift-syntax.git", "602.0.0"..<"604.0.0"),
-],
-targets: [
-    .macro(
-        name: "RequireFinalMacros",
-        dependencies: [
-            .product(name: "MacroPluginUtilities", package: "swift-macro-plugin-utilities"),
-            .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
-            .product(name: "SwiftSyntax", package: "swift-syntax"),
-            .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
-        ]
-    ),
-    .target(name: "RequireFinal", dependencies: ["RequireFinalMacros"]),
-]
+import CompilerPluginSupport
+import PackageDescription
+
+let package = Package(
+    name: "DiagnosticFixItExample",
+    platforms: [.macOS(.v13)],
+    dependencies: [
+        .package(url: "https://github.com/westdorp/swift-macro-plugin-utilities.git", .upToNextMinor(from: "0.7.0")),
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", "602.0.0"..<"604.0.0"),
+    ],
+    targets: [
+        .macro(
+            name: "RequireFinalMacros",
+            dependencies: [
+                .product(name: "MacroPluginUtilities", package: "swift-macro-plugin-utilities"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+            ]
+        ),
+        .target(name: "RequireFinal", dependencies: ["RequireFinalMacros"]),
+    ]
+)
 ```
 
 If another dependency already exposes `MacroPluginUtilities`, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` and write `import PluginUtilities` in your macro target.
 
-In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) validates non-class declarations, `open` classes, and `open` members, then emits one structured diagnostic with a deterministic fix-it:
+In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), after rejecting non-class declarations, `open` classes, already-`final` classes, and classes with `open` members, [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) emits one structured diagnostic with a deterministic fix-it:
 
 ```swift
-guard !hasModifier(named: "final", in: classDecl.modifiers) else {
-    return []
-}
-
 let fixIt = makeAddFinalFixIt(
     for: classDecl,
     fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: diagnosticDomain)

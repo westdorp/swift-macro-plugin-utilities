@@ -30,7 +30,7 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
     if normalized == expectedTypeName {
         return true
     }
-    return isNominalType(unwrappedBaseType(type))
+    return isQualificationMatchable(unwrappedBaseType(type))
         && normalized.hasSuffix(".\(expectedTypeName)")
 }
 
@@ -63,20 +63,23 @@ private func unwrappedBaseType(_ type: TypeSyntax) -> TypeSyntax {
     return type
 }
 
-private func isNominalType(_ type: TypeSyntax) -> Bool {
+private func isQualificationMatchable(_ type: TypeSyntax) -> Bool {
     if type.is(IdentifierTypeSyntax.self) {
         return true
     }
     if let memberType = type.as(MemberTypeSyntax.self) {
-        return isNominalType(memberType.baseType)
+        return isQualificationMatchable(unwrappedBaseType(memberType.baseType))
+    }
+    if let metatype = type.as(MetatypeTypeSyntax.self) {
+        return isQualificationMatchable(unwrappedBaseType(metatype.baseType))
     }
     return false
 }
 
 /// Renders a type in the canonical spelling used by expected-type tables:
 /// optionals as `?`, `any` markers dropped, single-element parentheses
-/// unwrapped, whitespace removed. `some` remains distinct because opaque
-/// types are not existential spellings.
+/// unwrapped, non-boundary whitespace removed. Adjacent word tokens keep a
+/// separating space so opaque and ownership keywords remain distinct.
 private func normalizedTypeText(_ type: TypeSyntax) -> String {
     if let optionalType = type.as(OptionalTypeSyntax.self) {
         return normalizedTypeText(optionalType.wrappedType) + "?"
@@ -98,16 +101,40 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
         return normalizedTypeText(element.type)
     }
 
-    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self) {
-        if someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-            return normalizedTypeText(someOrAnyType.constraint)
-        }
-        return "some " + normalizedTypeText(someOrAnyType.constraint)
+    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
+       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
+        return normalizedTypeText(someOrAnyType.constraint)
     }
 
-    return type.trimmedDescription.filter { character in
-        !character.isWhitespace
+    if let metatype = type.as(MetatypeTypeSyntax.self) {
+        return normalizedTypeText(metatype.baseType) + "." + metatype.metatypeSpecifier.text
     }
+
+    return normalizedTokenText(type)
+}
+
+private func normalizedTokenText(_ node: some SyntaxProtocol) -> String {
+    var result = ""
+    var previousEndedWithWord = false
+
+    for token in node.tokens(viewMode: .sourceAccurate) {
+        let text = token.text
+        guard let first = text.first, let last = text.last else {
+            continue
+        }
+        let startsWithWord = isTypeWordCharacter(first)
+        if previousEndedWithWord && startsWithWord {
+            result.append(" ")
+        }
+        result.append(text)
+        previousEndedWithWord = isTypeWordCharacter(last)
+    }
+
+    return result
+}
+
+private func isTypeWordCharacter(_ character: Character) -> Bool {
+    character.isLetter || character.isNumber || character == "_" || character == "`"
 }
 
 /// Returns whether a variable declaration is an instance property.

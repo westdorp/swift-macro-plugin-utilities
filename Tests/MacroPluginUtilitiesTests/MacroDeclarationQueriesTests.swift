@@ -57,6 +57,9 @@ struct MacroDeclarationQueriesTests {
             ("AVPlayer.TimeControlStatus", "AVPlayer.TimeControlStatus"),
             ("External.Error", "Error"),
             ("someModule.Error", "Error"),
+            ("Swift.Int.Type", "Int.Type"),
+            ("Swift.Int.Type?", "Int.Type?"),
+            ("(any Swift.Error).Type", "Error.Type"),
             ("Dictionary < String, Int >", "Dictionary<String,Int>"),
         ]
     )
@@ -70,9 +73,12 @@ struct MacroDeclarationQueriesTests {
             ("some Error", "Error"),
             ("some Equatable", "someEquatable"),
             ("(some Equatable)?", "someEquatable?"),
+            ("Box<some Probe>", "Box<someProbe>"),
+            ("borrowing some Probe", "borrowingsomeProbe"),
             ("some Swift.Error", "Error"),
             ("borrowing some Swift.Error", "Error"),
             ("(some Swift.Error)?", "Error?"),
+            ("(some Swift.Error).Type", "Error.Type"),
             ("Optional<some Swift.Error>", "Error?"),
             ("Bool", "Bool?"),
             ("(Int, Int)", "Int"),

@@ -150,6 +150,31 @@ struct MacroPropertyQueriesTests {
             ) == expected
         )
     }
+
+    @Test(
+        "Initializer matching preserves qualified metatypes and opaque wrapper boundaries",
+        arguments: [
+            ("init(value: Swift.Int.Type) {}", "Int.Type", true),
+            ("init(value: Int.Type) {}", "Int.Type", true),
+            ("init(value: Box<some Probe>) {}", "Box<someProbe>", false),
+            ("init(value: borrowing some Probe) {}", "borrowingsomeProbe", false),
+        ]
+    )
+    func initializerMatchingHandlesMetatypesAndOpaqueWrappers(
+        member: String,
+        parameterType: String,
+        expected: Bool
+    ) throws {
+        let classDecl = try parseClass("class Target { \(member) }")
+
+        #expect(
+            hasConflictingInitializer(
+                parameterLabel: "value",
+                parameterType: parameterType,
+                in: classDecl
+            ) == expected
+        )
+    }
 }
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
