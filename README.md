@@ -52,7 +52,7 @@ let package = Package(
 
 If another dependency already exposes `MacroPluginUtilities`, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` and write `import PluginUtilities` in your macro target.
 
-In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) accepts already-`final` classes without a diagnostic, diagnoses non-class declarations, `open` classes, and classes with `open` members, and for eligible non-final classes emits one structured diagnostic with a deterministic fix-it:
+In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) accepts already-`final` classes without a diagnostic, diagnoses non-class declarations, `open` classes, classes with `open` members, and classes with nested subclasses, and for eligible non-final classes emits one structured diagnostic with a deterministic fix-it:
 
 ```swift
 let fixIt = makeAddFinalFixIt(

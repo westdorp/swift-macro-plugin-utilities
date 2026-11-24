@@ -169,6 +169,45 @@ struct RequireFinalMacroTests {
     }
 
     @Test(
+        "Class with nested subclass suppresses single-modifier fix-it",
+        arguments: [
+            """
+            @RequireFinal
+            class Session {
+                class Child: Session {}
+            }
+            """,
+            """
+            @RequireFinal
+            class Session {
+                enum Namespace {
+                    class Child: Session {}
+                }
+            }
+            """,
+        ]
+    )
+    func classWithNestedSubclassSuppressesSingleModifierFixIt(source: String) throws {
+        let result = expand(source)
+        #expect(result.diagnostics.count == 1)
+
+        let diagnostic = try #require(result.diagnostics.first)
+        #expect(
+            diagnostic.diagnosticID
+                == MessageID(
+                    domain: RequireFinalMacro.diagnosticDomain,
+                    id: RequireFinalDiagnosticID.nestedSubclass.rawValue
+                )
+        )
+        #expect(diagnostic.diagMessage.severity == .error)
+        #expect(
+            diagnostic.message
+                == "WHAT: @RequireFinal requires a final class, but this class has a nested subclass. WHY: Swift forbids subclassing a 'final' class. HOW: Remove inheritance from 'Session' on nested subclasses and add the 'final' modifier to this class declaration."
+        )
+        #expect(diagnostic.fixIts.isEmpty)
+    }
+
+    @Test(
         "Non-class declaration emits class-only diagnostic without a fix-it",
         arguments: [
             "@RequireFinal\nstruct Session {}\n",

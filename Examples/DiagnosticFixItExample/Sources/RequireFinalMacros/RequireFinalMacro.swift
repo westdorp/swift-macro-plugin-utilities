@@ -6,6 +6,7 @@ public enum RequireFinalDiagnosticID: String, Sendable {
     case nonClassDeclaration = "non-class-declaration"
     case openClass = "open-class"
     case openMembers = "open-members"
+    case nestedSubclass = "nested-subclass"
     case missingFinal = "missing-final"
 }
 
@@ -57,6 +58,21 @@ public struct RequireFinalMacro: PeerMacro {
             return []
         }
 
+        if hasVisibleNestedSubclass(
+            in: classDecl.memberBlock.members,
+            superclassName: classDecl.name.text
+        ) {
+            context.diagnose(
+                classDecl.name,
+                domain: diagnosticDomain,
+                id: RequireFinalDiagnosticID.nestedSubclass,
+                what: "@RequireFinal requires a final class, but this class has a nested subclass.",
+                why: "Swift forbids subclassing a 'final' class.",
+                how: "Remove inheritance from '\(classDecl.name.text)' on nested subclasses and add the 'final' modifier to this class declaration."
+            )
+            return []
+        }
+
         let fixIt = makeAddFinalFixIt(
             for: classDecl,
             fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: diagnosticDomain)
@@ -97,4 +113,58 @@ private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
     }
 
     return false
+}
+
+private func hasVisibleNestedSubclass(
+    in members: MemberBlockItemListSyntax,
+    superclassName: String
+) -> Bool {
+    for member in members {
+        if let ifConfig = member.decl.as(IfConfigDeclSyntax.self) {
+            for clause in ifConfig.clauses {
+                if case .decls(let conditionalMembers) = clause.elements,
+                   hasVisibleNestedSubclass(
+                       in: conditionalMembers,
+                       superclassName: superclassName
+                   ) {
+                    return true
+                }
+            }
+            continue
+        }
+
+        if let nestedClass = member.decl.as(ClassDeclSyntax.self),
+           inheritsFromClass(named: superclassName, in: nestedClass) {
+            return true
+        }
+
+        if let nestedGroup = member.decl.asProtocol(DeclGroupSyntax.self),
+           hasVisibleNestedSubclass(
+               in: nestedGroup.memberBlock.members,
+               superclassName: superclassName
+           ) {
+            return true
+        }
+    }
+
+    return false
+}
+
+private func inheritsFromClass(
+    named superclassName: String,
+    in classDecl: ClassDeclSyntax
+) -> Bool {
+    guard let inheritedTypes = classDecl.inheritanceClause?.inheritedTypes else {
+        return false
+    }
+
+    return inheritedTypes.contains { inherited in
+        if let identifier = inherited.type.as(IdentifierTypeSyntax.self) {
+            return identifier.name.text == superclassName
+        }
+        if let member = inherited.type.as(MemberTypeSyntax.self) {
+            return member.name.text == superclassName
+        }
+        return false
+    }
 }

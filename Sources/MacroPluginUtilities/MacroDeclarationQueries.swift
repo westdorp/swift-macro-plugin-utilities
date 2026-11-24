@@ -30,13 +30,22 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
     if normalized == expectedTypeName {
         return true
     }
-    return isQualificationMatchable(unwrappedBaseType(type))
-        && normalized.hasSuffix(".\(expectedTypeName)")
+    return qualifiedTypeMatches(type, expected: expectedTypeName)
 }
 
-private func unwrappedBaseType(_ type: TypeSyntax) -> TypeSyntax {
+private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool {
+    guard !expected.isEmpty else {
+        return false
+    }
+
     if let optionalType = type.as(OptionalTypeSyntax.self) {
-        return unwrappedBaseType(optionalType.wrappedType)
+        guard expected.hasSuffix("?") else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            optionalType.wrappedType,
+            expected: String(expected.dropLast())
+        )
     }
 
     if let identifierType = type.as(IdentifierTypeSyntax.self),
@@ -45,35 +54,90 @@ private func unwrappedBaseType(_ type: TypeSyntax) -> TypeSyntax {
        arguments.count == 1,
        let argument = arguments.first,
        case .type(let wrappedType) = argument.argument {
-        return unwrappedBaseType(wrappedType)
+        guard expected.hasSuffix("?") else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            wrappedType,
+            expected: String(expected.dropLast())
+        )
+    }
+
+    if let iuoType = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+        guard expected.hasSuffix("!") else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            iuoType.wrappedType,
+            expected: String(expected.dropLast())
+        )
     }
 
     if let tupleType = type.as(TupleTypeSyntax.self),
        tupleType.elements.count == 1,
        let element = tupleType.elements.first,
        element.firstName == nil {
-        return unwrappedBaseType(element.type)
+        return qualifiedTypeMatches(element.type, expected: expected)
     }
 
     if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
        someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        return unwrappedBaseType(someOrAnyType.constraint)
+        return qualifiedTypeMatches(someOrAnyType.constraint, expected: expected)
     }
 
-    return type
+    if let metatype = type.as(MetatypeTypeSyntax.self) {
+        let suffix = ".\(metatype.metatypeSpecifier.text)"
+        guard expected.hasSuffix(suffix) else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            metatype.baseType,
+            expected: String(expected.dropLast(suffix.count))
+        )
+    }
+
+    guard let memberType = type.as(MemberTypeSyntax.self),
+          isNominalChain(memberType.baseType)
+    else {
+        return false
+    }
+
+    var suffix = normalizedMemberSegment(memberType)
+    if suffix == expected {
+        return true
+    }
+
+    var current: TypeSyntax = memberType.baseType
+    while let parentMember = current.as(MemberTypeSyntax.self) {
+        suffix = normalizedMemberSegment(parentMember) + "." + suffix
+        if suffix == expected {
+            return true
+        }
+        current = parentMember.baseType
+    }
+
+    if let rootIdentifier = current.as(IdentifierTypeSyntax.self) {
+        return normalizedTokenText(rootIdentifier) + "." + suffix == expected
+    }
+
+    return false
 }
 
-private func isQualificationMatchable(_ type: TypeSyntax) -> Bool {
+private func isNominalChain(_ type: TypeSyntax) -> Bool {
     if type.is(IdentifierTypeSyntax.self) {
         return true
     }
     if let memberType = type.as(MemberTypeSyntax.self) {
-        return isQualificationMatchable(unwrappedBaseType(memberType.baseType))
-    }
-    if let metatype = type.as(MetatypeTypeSyntax.self) {
-        return isQualificationMatchable(unwrappedBaseType(metatype.baseType))
+        return isNominalChain(memberType.baseType)
     }
     return false
+}
+
+private func normalizedMemberSegment(_ member: MemberTypeSyntax) -> String {
+    guard let genericClause = member.genericArgumentClause else {
+        return member.name.text
+    }
+    return member.name.text + normalizedTokenText(genericClause)
 }
 
 /// Renders a type in the canonical spelling used by expected-type tables:
@@ -93,6 +157,10 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
        let argument = arguments.first,
        case .type(let wrappedType) = argument.argument {
         return normalizedPostfixBaseText(wrappedType) + "?"
+    }
+
+    if let iuoType = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+        return normalizedPostfixBaseText(iuoType.wrappedType) + "!"
     }
 
     if let tupleType = type.as(TupleTypeSyntax.self),
