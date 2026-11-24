@@ -190,6 +190,7 @@ struct MacroDeclarationQueriesTests {
             ("borrowing some Collection<Swift.Int>", "borrowing some Collection<Int>"),
             ("(some Collection<Swift.Int>)?", "Optional<some Collection<Int>>"),
             ("some Swift.Equatable & Swift.Sendable", "some Equatable & Sendable"),
+            ("P & ~Swift.Copyable", "P & ~Copyable"),
             ("some (Int?).Marker", "some (Int?).Marker"),
             ("some (Int?).Marker", "some Optional<Int>.Marker"),
             ("some Optional<Int>.Marker", "some (Int?).Marker"),
@@ -275,6 +276,9 @@ struct MacroDeclarationQueriesTests {
             ("any P & Q", "(any P) & Q"),
             ("(any P) & Q", "(any P) & Q"),
             ("(some P) & Q", "(some P) & Q"),
+            ("P & ~(any Q)", "P & ~(any Q)"),
+            ("P & ~(some Q)", "P & ~(some Q)"),
+            ("~(any Q)", "~(any Q)"),
             ("(Swift).Optional<Int>.Marker", "Int?.Marker"),
             ("(Swift).Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
             ("(Swift).Optional<Int>", "Int?"),
@@ -382,9 +386,22 @@ struct MacroDeclarationQueriesTests {
             )
         )
 
+        let attributedInoutParameter = TupleTypeElementSyntax(
+            inoutKeyword: .keyword(.inout, trailingTrivia: .space),
+            type: parseType("@Sendable () -> Swift.Int")
+        )
+        let syntheticAttributedFunction = TypeSyntax(
+            FunctionTypeSyntax(
+                parameters: TupleTypeElementListSyntax([attributedInoutParameter]),
+                returnClause: ReturnClauseSyntax(type: IdentifierTypeSyntax(name: .identifier("Void")))
+            )
+        )
+
         #expect(typeMatches(syntheticFunction, expectedTypeName: "(inout Int) -> Void"))
         #expect(typeMatches(syntheticFunction, expectedTypeName: "(_ value: inout Int) -> Void"))
         #expect(typeMatches(syntheticQualifiedFunction, expectedTypeName: "(_ value: inout Int) -> Void"))
+        #expect(typeMatches(syntheticAttributedFunction, expectedTypeName: "(_ value: inout @Sendable () -> Int) -> Void"))
+        #expect(!typeMatches(syntheticAttributedFunction, expectedTypeName: "(@Sendable () -> Int) -> Void"))
         #expect(!typeMatches(syntheticFunction, expectedTypeName: "(Int) -> Void"))
         #expect(!typeMatches(syntheticSingleTuple, expectedTypeName: "Int"))
     }

@@ -227,8 +227,10 @@ struct MacroPropertyQueriesTests {
 }
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
-    try #require(
-        Parser.parse(source: source)
+    let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    return try #require(
+        sourceFile
             .statements.first?
             .item.as(DeclSyntax.self)?
             .as(ClassDeclSyntax.self)

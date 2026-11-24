@@ -307,6 +307,7 @@ struct RequireFinalMacroTests {
     func fixItApplierRejectsUnmappedAnchor() throws {
         let result = expand("@RequireFinal\nclass Session {}\n")
         let unmappedTree = Parser.parse(source: "@RequireFinal\nclass Session {}\n")
+        #expect(!unmappedTree.hasError)
         let unmappedClass = try #require(
             unmappedTree.statements.first?.item.as(ClassDeclSyntax.self)
         )
@@ -337,6 +338,7 @@ private struct ExpansionResult {
 
 private func expand(_ source: String) -> ExpansionResult {
     let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
     let context = BasicMacroExpansionContext(
         sourceFiles: [
             sourceFile: .init(moduleName: "ExampleModule", fullFilePath: "Example.swift")

@@ -152,8 +152,8 @@ private func typeSyntaxMatches(
             return false
         }
         return zip(lhsComposition.elements, rhsComposition.elements).allSatisfy { lElement, rElement in
-            !unwrapGrouping(lElement.type).is(SomeOrAnyTypeSyntax.self)
-                && !unwrapGrouping(rElement.type).is(SomeOrAnyTypeSyntax.self)
+            isValidOpaqueConstraint(lElement.type)
+                && isValidOpaqueConstraint(rElement.type)
                 && typeSyntaxMatches(
                     lElement.type,
                     rElement.type,
@@ -243,7 +243,11 @@ private func typeSyntaxMatches(
     let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self)
     let rhsSuppressed = rhs.as(SuppressedTypeSyntax.self)
     if lhsSuppressed != nil || rhsSuppressed != nil {
-        guard let lhsSuppressed, let rhsSuppressed else {
+        guard let lhsSuppressed,
+              let rhsSuppressed,
+              isNominalExistentialConstraint(lhsSuppressed.type),
+              isNominalExistentialConstraint(rhsSuppressed.type)
+        else {
             return false
         }
         return typeSyntaxMatches(
@@ -273,11 +277,7 @@ private func tupleElementsMatch(
         lElement.firstName?.text == rElement.firstName?.text
             && lElement.secondName?.text == rElement.secondName?.text
             && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
-            && typeSyntaxMatches(
-                effectiveTupleElementType(lElement),
-                effectiveTupleElementType(rElement),
-                allowExistentialUnwrap: true
-            )
+            && tupleElementTypesMatch(lElement, rElement)
     }
 }
 
@@ -293,35 +293,57 @@ private func functionParametersMatch(
         isValidFunctionParameterLabel(lElement)
             && isValidFunctionParameterLabel(rElement)
             && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
-            && typeSyntaxMatches(
-                effectiveTupleElementType(lElement),
-                effectiveTupleElementType(rElement),
-                allowExistentialUnwrap: true
-            )
+            && tupleElementTypesMatch(lElement, rElement)
     }
 }
 
-private func effectiveTupleElementType(_ element: TupleTypeElementSyntax) -> TypeSyntax {
-    guard let inoutKeyword = element.inoutKeyword else {
-        return element.type
+private func tupleElementTypesMatch(
+    _ lhs: TupleTypeElementSyntax,
+    _ rhs: TupleTypeElementSyntax
+) -> Bool {
+    guard lhs.inoutKeyword != nil || rhs.inoutKeyword != nil else {
+        return typeSyntaxMatches(lhs.type, rhs.type, allowExistentialUnwrap: true)
     }
 
-    let inoutSpecifier = TypeSpecifierListSyntax.Element.simpleTypeSpecifier(
-        SimpleTypeSpecifierSyntax(specifier: inoutKeyword.trimmed)
-    )
+    let lhsParts = splitTupleElementType(lhs)
+    let rhsParts = splitTupleElementType(rhs)
+    guard lhsParts.specifiers == rhsParts.specifiers,
+          lhsParts.attributes == rhsParts.attributes,
+          lhsParts.lateSpecifiers == rhsParts.lateSpecifiers
+    else {
+        return false
+    }
+
+    return typeSyntaxMatches(lhsParts.baseType, rhsParts.baseType, allowExistentialUnwrap: true)
+}
+
+private func splitTupleElementType(
+    _ element: TupleTypeElementSyntax
+) -> (specifiers: String, attributes: String, lateSpecifiers: String, baseType: TypeSyntax) {
+    let elementInout = element.inoutKeyword?.text
     if let attributed = element.type.as(AttributedTypeSyntax.self) {
-        var specifiers = Array(attributed.specifiers)
-        specifiers.insert(inoutSpecifier, at: 0)
-        return TypeSyntax(attributed.with(\.specifiers, TypeSpecifierListSyntax(specifiers)))
+        let existingSpecifiers = normalizedTokenText(attributed.specifiers)
+        let specifiers = switch (elementInout, existingSpecifiers.isEmpty) {
+        case (let keyword?, true):
+            keyword
+        case (let keyword?, false):
+            "\(keyword) \(existingSpecifiers)"
+        case (nil, _):
+            existingSpecifiers
+        }
+        return (
+            specifiers: specifiers,
+            attributes: normalizedTokenText(attributed.attributes),
+            lateSpecifiers: normalizedTokenText(attributed.lateSpecifiers),
+            baseType: attributed.baseType
+        )
     }
 
-    return TypeSyntax(
-        AttributedTypeSyntax(
-            specifiers: TypeSpecifierListSyntax([inoutSpecifier]),
-            attributes: AttributeListSyntax([]),
-            lateSpecifiers: TypeSpecifierListSyntax([]),
-            baseType: element.type
-        )
+    return (
+        specifiers: elementInout ?? "",
+        attributes: "",
+        lateSpecifiers: "",
+        baseType: element.type
     )
 }
 
