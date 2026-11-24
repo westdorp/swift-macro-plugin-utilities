@@ -64,24 +64,8 @@ struct RequireFinalMacroTests {
                 "enum Scope {\n    @RequireFinal\n    final class Session {}\n}\n"
             ),
             (
-                "@RequireFinal\npublic class Session {\n    open class Nested {}\n}\n",
-                "@RequireFinal\npublic final class Session {\n    open class Nested {}\n}\n"
-            ),
-            (
-                "enum Other { class Session {} }\n@RequireFinal\nclass Session {\n    class Child: Other.Session {}\n}\n",
-                "enum Other { class Session {} }\n@RequireFinal\nfinal class Session {\n    class Child: Other.Session {}\n}\n"
-            ),
-            (
-                "@RequireFinal\nclass Session {\n    enum Scope {\n        class Session {}\n        class Child: Session {}\n    }\n}\n",
-                "@RequireFinal\nfinal class Session {\n    enum Scope {\n        class Session {}\n        class Child: Session {}\n    }\n}\n"
-            ),
-            (
-                "@RequireFinal\nclass Session {\n    class Session {}\n    class Child: Session {}\n}\n",
-                "@RequireFinal\nfinal class Session {\n    class Session {}\n    class Child: Session {}\n}\n"
-            ),
-            (
-                "enum Outer {\n    class Session {}\n    func example() {\n        @RequireFinal\n        class Session {\n            class Child: Outer.Session {}\n        }\n        _ = Session()\n    }\n}\n",
-                "enum Outer {\n    class Session {}\n    func example() {\n        @RequireFinal\n        final class Session {\n            class Child: Outer.Session {}\n        }\n        _ = Session()\n    }\n}\n"
+                "@RequireFinal\npublic class Session {\n    struct Nested {}\n}\n",
+                "@RequireFinal\npublic final class Session {\n    struct Nested {}\n}\n"
             ),
         ]
     )
@@ -124,9 +108,15 @@ struct RequireFinalMacroTests {
         #expect(reexpanded.diagnostics.isEmpty)
     }
 
-    @Test("Open class emits conflict diagnostic without an invalid fix-it")
-    func openClassEmitsConflictDiagnosticWithoutFixIt() throws {
-        let result = expand("@RequireFinal\nopen class Session {}\n")
+    @Test(
+        "Open class emits conflict diagnostic without an invalid fix-it",
+        arguments: [
+            "@RequireFinal\nopen class Session {}\n",
+            "@RequireFinal\nopen final class Session {}\n",
+        ]
+    )
+    func openClassEmitsConflictDiagnosticWithoutFixIt(source: String) throws {
+        let result = expand(source)
         #expect(result.diagnostics.count == 1)
 
         let diagnostic = try #require(result.diagnostics.first)
@@ -179,13 +169,13 @@ struct RequireFinalMacroTests {
         #expect(diagnostic.diagMessage.severity == .error)
         #expect(
             diagnostic.message
-                == "WHAT: @RequireFinal requires a final class, but this class declares 'open' members. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change the 'open' members to 'public' and add the 'final' modifier to this class declaration."
+                == "WHAT: @RequireFinal requires a final class, but this class contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' before adding 'final'."
         )
         #expect(diagnostic.fixIts.isEmpty)
     }
 
     @Test(
-        "Class with nested subclass suppresses single-modifier fix-it",
+        "Class with nested or local class declarations suppresses automatic fix-it",
         arguments: [
             """
             @RequireFinal
@@ -196,74 +186,28 @@ struct RequireFinalMacroTests {
             """
             @RequireFinal
             class Session {
-                enum Namespace {
-                    class Child: Session {}
-                }
+                typealias Base = Session
+                class Child: Base {}
             }
             """,
             """
             @RequireFinal
             class Session {
                 func make() {
-                    class Child: Session {}
-                    _ = Child()
-                }
-            }
-            """,
-            """
-            enum Outer {
-                @RequireFinal
-                class Session {
-                    class Child: Outer.Session {}
+                    class Local: Session {}
+                    _ = Local()
                 }
             }
             """,
             """
             @RequireFinal
-            class Session {
-                class Child: ExampleModule.Session {}
-            }
-            """,
-            """
-            @RequireFinal
-            class Session {
-                class Child: (Session) {}
-            }
-            """,
-            """
-            @RequireFinal
-            class `Session` {
-                class Child: Session {}
-            }
-            """,
-            """
-            @RequireFinal
-            class Session {
-                class Child: `Session` {}
-            }
-            """,
-            """
-            @RequireFinal
-            class Session {
-                enum Scope {
-                    #if os(Linux)
-                    class Session {}
-                    #else
-                    class Child: Session {}
-                    #endif
-                }
-            }
-            """,
-            """
-            @RequireFinal
-            class Session {
-                class Session {}
-                class Child: ExampleModule.Session {}
+            public class Session {
+                open class Nested {}
             }
             """,
         ]
     )
-    func classWithNestedSubclassSuppressesSingleModifierFixIt(source: String) throws {
+    func classWithNestedClassesSuppressesAutomaticFixIt(source: String) throws {
         let result = expand(source)
         #expect(result.diagnostics.count == 1)
 
@@ -272,13 +216,13 @@ struct RequireFinalMacroTests {
             diagnostic.diagnosticID
                 == MessageID(
                     domain: RequireFinalMacro.diagnosticDomain,
-                    id: RequireFinalDiagnosticID.nestedSubclass.rawValue
+                    id: RequireFinalDiagnosticID.nestedClasses.rawValue
                 )
         )
         #expect(diagnostic.diagMessage.severity == .error)
         #expect(
             diagnostic.message
-                == "WHAT: @RequireFinal requires a final class, but this class has a nested subclass. WHY: Swift forbids subclassing a 'final' class. HOW: Remove inheritance from 'Session' on nested subclasses and add the 'final' modifier to this class declaration."
+                == "WHAT: @RequireFinal requires a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Nested or local classes may subclass this class, which Swift forbids once 'final' is added. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
         )
         #expect(diagnostic.fixIts.isEmpty)
     }

@@ -6,8 +6,17 @@ public enum RequireFinalDiagnosticID: String, Sendable {
     case nonClassDeclaration = "non-class-declaration"
     case openClass = "open-class"
     case openMembers = "open-members"
-    case nestedSubclass = "nested-subclass"
+    case nestedClasses = "nested-classes"
     case missingFinal = "missing-final"
+}
+
+private enum RequireFinalValidation {
+    case validFinalClass
+    case nonClass
+    case openClass(ClassDeclSyntax)
+    case classWithOpenMembers(ClassDeclSyntax)
+    case classWithNestedClasses(ClassDeclSyntax)
+    case fixableNonFinalClass(ClassDeclSyntax)
 }
 
 public struct RequireFinalMacro: PeerMacro {
@@ -18,7 +27,10 @@ public struct RequireFinalMacro: PeerMacro {
         providingPeersOf declaration: some DeclSyntaxProtocol,
         in context: some MacroExpansionContext
     ) -> [DeclSyntax] {
-        guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
+        switch validate(declaration) {
+        case .validFinalClass:
+            return []
+        case .nonClass:
             context.diagnose(
                 declaration,
                 domain: diagnosticDomain,
@@ -28,9 +40,7 @@ public struct RequireFinalMacro: PeerMacro {
                 how: "Remove @RequireFinal from this declaration or attach it to a class."
             )
             return []
-        }
-
-        if hasModifier(named: "open", in: classDecl.modifiers) {
+        case .openClass(let classDecl):
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
@@ -40,52 +50,62 @@ public struct RequireFinalMacro: PeerMacro {
                 how: "Replace 'open' with 'public final', change any 'open' members to 'public', or remove @RequireFinal."
             )
             return []
-        }
-
-        guard !hasModifier(named: "final", in: classDecl.modifiers) else {
-            return []
-        }
-
-        if hasOpenMember(in: classDecl.memberBlock.members) {
+        case .classWithOpenMembers(let classDecl):
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.openMembers,
-                what: "@RequireFinal requires a final class, but this class declares 'open' members.",
+                what: "@RequireFinal requires a final class, but this class contains 'open' member declarations.",
                 why: "Swift forbids 'open' members on a 'final' class.",
-                how: "Change the 'open' members to 'public' and add the 'final' modifier to this class declaration."
+                how: "Change any 'open' members to 'public' before adding 'final'."
             )
             return []
-        }
-
-        if hasVisibleNestedSubclass(in: classDecl, context: context) {
-            let className = unescapedIdentifier(classDecl.name.text)
+        case .classWithNestedClasses(let classDecl):
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
-                id: RequireFinalDiagnosticID.nestedSubclass,
-                what: "@RequireFinal requires a final class, but this class has a nested subclass.",
-                why: "Swift forbids subclassing a 'final' class.",
-                how: "Remove inheritance from '\(className)' on nested subclasses and add the 'final' modifier to this class declaration."
+                id: RequireFinalDiagnosticID.nestedClasses,
+                what: "@RequireFinal requires a final class, and omits the automatic fix-it when the class contains nested or local class declarations.",
+                why: "Nested or local classes may subclass this class, which Swift forbids once 'final' is added.",
+                how: "Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
+            )
+            return []
+        case .fixableNonFinalClass(let classDecl):
+            let fixIt = makeAddFinalFixIt(
+                for: classDecl,
+                fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: diagnosticDomain)
+            )
+            context.diagnose(
+                classDecl.name,
+                domain: diagnosticDomain,
+                id: RequireFinalDiagnosticID.missingFinal,
+                what: "@RequireFinal requires a final class.",
+                why: "Subclasses would bypass the type's invariants.",
+                how: "Add the 'final' modifier to this class declaration.",
+                fixIts: [fixIt]
             )
             return []
         }
-
-        let fixIt = makeAddFinalFixIt(
-            for: classDecl,
-            fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: diagnosticDomain)
-        )
-        context.diagnose(
-            classDecl.name,
-            domain: diagnosticDomain,
-            id: RequireFinalDiagnosticID.missingFinal,
-            what: "@RequireFinal requires a final class.",
-            why: "Subclasses would bypass the type's invariants.",
-            how: "Add the 'final' modifier to this class declaration.",
-            fixIts: [fixIt]
-        )
-        return []
     }
+}
+
+private func validate(_ declaration: some DeclSyntaxProtocol) -> RequireFinalValidation {
+    guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
+        return .nonClass
+    }
+    if hasModifier(named: "open", in: classDecl.modifiers) {
+        return .openClass(classDecl)
+    }
+    if hasModifier(named: "final", in: classDecl.modifiers) {
+        return .validFinalClass
+    }
+    if hasOpenMember(in: classDecl.memberBlock.members) {
+        return .classWithOpenMembers(classDecl)
+    }
+    if hasNestedClass(in: classDecl.memberBlock) {
+        return .classWithNestedClasses(classDecl)
+    }
+    return .fixableNonFinalClass(classDecl)
 }
 
 private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
@@ -113,223 +133,17 @@ private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
     return false
 }
 
-private func hasVisibleNestedSubclass(
-    in classDecl: ClassDeclSyntax,
-    context: some MacroExpansionContext
-) -> Bool {
-    let attachedName = unescapedIdentifier(classDecl.name.text)
-    var candidatePaths: [[String]]
-    if let enclosing = enclosingNominalPath(
-        for: classDecl,
-        lexicalContext: context.lexicalContext
-    ) {
-        let attachedPath = enclosing + [attachedName]
-        candidatePaths = [attachedPath]
-        if let module = moduleName(for: classDecl, in: context) {
-            candidatePaths.append([module] + attachedPath)
-        }
-    } else {
-        candidatePaths = [[attachedName]]
-    }
+private func hasNestedClass(in memberBlock: MemberBlockSyntax) -> Bool {
+    final class Finder: SyntaxVisitor {
+        var found = false
 
-    let finder = NestedSubclassFinder(
-        candidatePaths: candidatePaths,
-        rootMemberBlock: classDecl.memberBlock
-    )
-    finder.walk(classDecl.memberBlock)
-    return finder.found
-}
-
-private final class NestedSubclassFinder: SyntaxVisitor {
-    let candidatePaths: [[String]]
-    let rootMemberBlock: MemberBlockSyntax
-    var found = false
-
-    init(candidatePaths: [[String]], rootMemberBlock: MemberBlockSyntax) {
-        self.candidatePaths = candidatePaths
-        self.rootMemberBlock = rootMemberBlock
-        super.init(viewMode: .sourceAccurate)
-    }
-
-    override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
-        if let inheritedTypes = node.inheritanceClause?.inheritedTypes,
-           inheritedTypes.contains(where: {
-               matchesAttachedClass(
-                   $0.type,
-                   from: node,
-                   rootMemberBlock: rootMemberBlock,
-                   candidatePaths: candidatePaths
-               )
-           }) {
+        override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
             found = true
             return .skipChildren
         }
-        return found ? .skipChildren : .visitChildren
-    }
-}
-
-private func matchesAttachedClass(
-    _ type: TypeSyntax,
-    from childClass: ClassDeclSyntax,
-    rootMemberBlock: MemberBlockSyntax,
-    candidatePaths: [[String]]
-) -> Bool {
-    guard let components = nominalPathComponents(for: type),
-          let leadingName = components.first,
-          candidatePaths.contains(where: { path in
-              components.count <= path.count
-                  && Array(path.suffix(components.count)) == components
-          })
-    else {
-        return false
     }
 
-    return !isLeadingNameShadowed(
-        leadingName,
-        from: childClass,
-        through: rootMemberBlock
-    )
-}
-
-private func isLeadingNameShadowed(
-    _ name: String,
-    from childClass: ClassDeclSyntax,
-    through rootMemberBlock: MemberBlockSyntax
-) -> Bool {
-    let childDecl = DeclSyntax(childClass)
-    var current = Syntax(childClass).parent
-
-    while let node = current {
-        if let memberList = node.as(MemberBlockItemListSyntax.self),
-           memberList.contains(where: {
-               $0.decl != childDecl && declaredTypeName(of: $0.decl) == name
-           }) {
-            return true
-        }
-        if let statementList = node.as(CodeBlockItemListSyntax.self),
-           statementList.contains(where: {
-               guard case .decl(let decl) = $0.item else {
-                   return false
-               }
-               return decl != childDecl && declaredTypeName(of: decl) == name
-           }) {
-            return true
-        }
-        if node == Syntax(rootMemberBlock) {
-            break
-        }
-        current = node.parent
-    }
-    return false
-}
-
-private func declaredTypeName(of decl: DeclSyntax) -> String? {
-    if let classDecl = decl.as(ClassDeclSyntax.self) {
-        return unescapedIdentifier(classDecl.name.text)
-    }
-    if let structDecl = decl.as(StructDeclSyntax.self) {
-        return unescapedIdentifier(structDecl.name.text)
-    }
-    if let enumDecl = decl.as(EnumDeclSyntax.self) {
-        return unescapedIdentifier(enumDecl.name.text)
-    }
-    if let actorDecl = decl.as(ActorDeclSyntax.self) {
-        return unescapedIdentifier(actorDecl.name.text)
-    }
-    if let protocolDecl = decl.as(ProtocolDeclSyntax.self) {
-        return unescapedIdentifier(protocolDecl.name.text)
-    }
-    if let typeAliasDecl = decl.as(TypeAliasDeclSyntax.self) {
-        return unescapedIdentifier(typeAliasDecl.name.text)
-    }
-    return nil
-}
-
-private func unescapedIdentifier(_ text: String) -> String {
-    if text.count >= 2, text.first == "`", text.last == "`" {
-        return String(text.dropFirst().dropLast())
-    }
-    return text
-}
-
-private func moduleName(
-    for classDecl: ClassDeclSyntax,
-    in context: some MacroExpansionContext
-) -> String? {
-    guard let location = context.location(
-        of: classDecl,
-        at: .afterLeadingTrivia,
-        filePathMode: .fileID
-    ),
-    let stringLiteral = location.file.as(StringLiteralExprSyntax.self),
-    let represented = stringLiteral.representedLiteralValue,
-    let slash = represented.firstIndex(of: "/"),
-    slash > represented.startIndex
-    else {
-        return nil
-    }
-    return String(represented[..<slash])
-}
-
-private func enclosingNominalPath(
-    for classDecl: ClassDeclSyntax,
-    lexicalContext: [Syntax]
-) -> [String]? {
-    var components: [String] = []
-    if let parent = Syntax(classDecl).parent {
-        var current: Syntax? = parent
-        while let node = current {
-            if isLocalScopeBoundary(node) {
-                return nil
-            }
-            components.insert(contentsOf: enclosingComponents(for: node), at: 0)
-            current = node.parent
-        }
-    } else {
-        for node in lexicalContext {
-            if isLocalScopeBoundary(node) {
-                return nil
-            }
-            components.insert(contentsOf: enclosingComponents(for: node), at: 0)
-        }
-    }
-    return components
-}
-
-private func isLocalScopeBoundary(_ syntax: Syntax) -> Bool {
-    syntax.is(FunctionDeclSyntax.self)
-        || syntax.is(InitializerDeclSyntax.self)
-        || syntax.is(SubscriptDeclSyntax.self)
-        || syntax.is(AccessorDeclSyntax.self)
-        || syntax.is(DeinitializerDeclSyntax.self)
-        || syntax.is(ClosureExprSyntax.self)
-        || syntax.is(CodeBlockSyntax.self)
-}
-
-private func enclosingComponents(for syntax: Syntax) -> [String] {
-    if let extensionDecl = syntax.as(ExtensionDeclSyntax.self) {
-        return nominalPathComponents(for: extensionDecl.extendedType) ?? []
-    }
-    if let decl = syntax.as(DeclSyntax.self),
-       let name = declaredTypeName(of: decl) {
-        return [name]
-    }
-    return []
-}
-
-private func nominalPathComponents(for type: TypeSyntax) -> [String]? {
-    if let tuple = type.as(TupleTypeSyntax.self),
-       tuple.elements.count == 1,
-       let element = tuple.elements.first,
-       element.firstName == nil {
-        return nominalPathComponents(for: element.type)
-    }
-    if let identifier = type.as(IdentifierTypeSyntax.self) {
-        return [unescapedIdentifier(identifier.name.text)]
-    }
-    if let member = type.as(MemberTypeSyntax.self),
-       let baseComponents = nominalPathComponents(for: member.baseType) {
-        return baseComponents + [unescapedIdentifier(member.name.text)]
-    }
-    return nil
+    let finder = Finder(viewMode: .sourceAccurate)
+    finder.walk(memberBlock)
+    return finder.found
 }
