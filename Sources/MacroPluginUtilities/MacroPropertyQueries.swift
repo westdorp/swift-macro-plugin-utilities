@@ -25,7 +25,15 @@ public func hasStoredLetProperty(
         return false
     }
 
-    return classDecl.memberBlock.members.contains { member in
+    return hasStoredLetProperty(named: propertyName, typePattern: expectedPattern, in: classDecl)
+}
+
+func hasStoredLetProperty(
+    named propertyName: String,
+    typePattern expectedPattern: ExpectedTypePattern,
+    in classDecl: ClassDeclSyntax
+) -> Bool {
+    classDecl.memberBlock.members.contains { member in
         guard let variableDecl = member.decl.as(VariableDeclSyntax.self),
               variableDecl.bindingSpecifier.tokenKind == .keyword(.let),
               isInstanceVariable(variableDecl)
@@ -112,7 +120,19 @@ public func hasConflictingInitializer(
         return false
     }
 
-    return classDecl.memberBlock.members.contains { member in
+    return hasConflictingInitializer(
+        parameterLabel: parameterLabel,
+        parameterTypePattern: expectedPattern,
+        in: classDecl
+    )
+}
+
+func hasConflictingInitializer(
+    parameterLabel: String,
+    parameterTypePattern expectedPattern: ExpectedTypePattern,
+    in classDecl: ClassDeclSyntax
+) -> Bool {
+    classDecl.memberBlock.members.contains { member in
         guard let initializerDecl = member.decl.as(InitializerDeclSyntax.self) else {
             return false
         }

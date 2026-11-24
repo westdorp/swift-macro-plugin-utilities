@@ -85,21 +85,21 @@ struct MacroAttachedClassValidationTests {
                 source: "@MainActor public class Monitor { let player: AVPlayer; open func reload() {} }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
+                message: "WHAT: @Observer requires a final class, but this class contains 'open' member declarations. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
                 fixItMessages: []
             ),
             MissingRequirement(
                 source: "@MainActor public class Monitor {\n    let player: AVPlayer\n    #if DEBUG\n    open func reload() {}\n    #endif\n}",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
+                message: "WHAT: @Observer requires a final class, but this class contains 'open' member declarations. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
                 fixItMessages: []
             ),
             MissingRequirement(
                 source: "@MainActor public class Monitor { let player: AVPlayer; open func reload() {}; class Child: Monitor {} }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually.",
+                message: "WHAT: @Observer requires a final class, but this class contains 'open' member declarations. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually.",
                 fixItMessages: []
             ),
             MissingRequirement(
@@ -264,6 +264,71 @@ struct MacroAttachedClassValidationTests {
         #expect(
             diagnostic.message
                 == "WHAT: @Tracker requires a stored instance property 'let session: Session'. WHY: Tracking reads the session. HOW: Add 'let session: Session'."
+        )
+    }
+
+    @Test(
+        "Unparseable configured type fails closed for stored property and initializer availability",
+        arguments: [
+            ("()asyncthrows->Void", "()asyncthrows->Void"),
+            ("[Int", "[Int"),
+            ("", ""),
+            ("   ", " "),
+        ]
+    )
+    func unparseableConfiguredTypeFailsClosed(
+        configuredType: String,
+        displayedType: String
+    ) throws {
+        let requirements = MacroAttachedClassRequirements(
+            attributeName: "@Handler",
+            exampleClassName: "Runner",
+            lifecycleOwnershipReason: "Runner owns handler state.",
+            mainActorReason: "Runner runs on MainActor.",
+            storedPropertyName: "action",
+            storedPropertyTypeName: configuredType,
+            storedPropertyReason: "Runner invokes the action.",
+            initializerReason: "Runner synthesizes its initializer.",
+            diagnosticDomain: "HandlerMacro",
+            diagnosticIDs: .init(
+                classOnly: "class-only",
+                mainActorRequired: "mainactor-required",
+                storedPropertyRequired: "action-required",
+                initializerConflict: "init-conflict"
+            )
+        )
+        let declaration = try parseClass(
+            """
+            @MainActor
+            final class Runner {
+                let action: () async throws -> Void
+                init(action: () async throws -> Void) { self.action = action }
+            }
+            """
+        )
+        let validator = MacroAttachedClassValidator(
+            classDeclaration: declaration,
+            requirements: requirements
+        )
+        let context = BasicMacroExpansionContext(lexicalContext: [])
+
+        #expect(!hasConflictingInitializer(parameterLabel: "action", parameterType: configuredType, in: declaration))
+        #expect(!validator.satisfies(.storedLetProperty))
+        #expect(!validator.satisfies(.initializerAvailability))
+        #expect(!validator.validate([.storedLetProperty, .initializerAvailability], in: context))
+        #expect(
+            context.diagnostics.map(\.diagnosticID)
+                == [
+                    MessageID(domain: "HandlerMacro", id: "action-required"),
+                    MessageID(domain: "HandlerMacro", id: "init-conflict"),
+                ]
+        )
+        #expect(
+            context.diagnostics.map(\.message)
+                == [
+                    "WHAT: @Handler cannot validate stored property 'action' because configured type '\(displayedType)' is not valid Swift type syntax. WHY: Macro requirements must specify parseable Swift type syntax to match declarations safely. HOW: Update the macro's configured storedPropertyTypeName to valid Swift type syntax.",
+                    "WHAT: @Handler cannot validate 'init(action:)' because configured type '\(displayedType)' is not valid Swift type syntax. WHY: Macro requirements must specify parseable Swift type syntax to detect conflicting initializers safely. HOW: Update the macro's configured storedPropertyTypeName to valid Swift type syntax.",
+                ]
         )
     }
 }

@@ -10,9 +10,12 @@
   recovered incomplete spellings such as `[Int` no longer match `[Int`).
   Unparseable `expectedTypeName` or `parameterType` strings (including legacy
   whitespace-stripped forms such as `()asyncthrows->Void`) return `false` from
-  `typeMatches`, `hasStoredLetProperty`, and `hasConflictingInitializer`; pass
-  valid Swift type syntax when configuring
-  `MacroAttachedClassRequirements.storedPropertyTypeName`.
+  `typeMatches`, `hasStoredLetProperty`, and `hasConflictingInitializer`. Inside
+  `MacroAttachedClassValidator`, an unparseable
+  `MacroAttachedClassRequirements.storedPropertyTypeName` fails closed for both
+  `.storedLetProperty` and `.initializerAvailability` (`satisfies` returns
+  `false` and `validate` diagnoses the invalid configured type syntax) rather
+  than treating the initializer slot as available.
 - `typeMatches` now preserves a separating space between adjacent word tokens
   instead of stripping all whitespace. Expected strings for multi-word spellings
   must include that space (for example `()async throws->Void`, `inout Foo`,

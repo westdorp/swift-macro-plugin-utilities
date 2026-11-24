@@ -34,7 +34,7 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
     return expectedPattern.matches(type)
 }
 
-struct ExpectedTypePattern {
+struct ExpectedTypePattern: Sendable {
     private let root: ExpectedTypeNode
 
     init?(parsing text: String) {
@@ -93,7 +93,7 @@ private enum TypeMatchMode {
     case nominalConstraint
 }
 
-private indirect enum ExpectedTypeNode {
+private indirect enum ExpectedTypeNode: Sendable {
     case existential(ExpectedTypeNode)
     case opaque(ExpectedTypeNode)
     case optional(ExpectedTypeNode)
@@ -123,29 +123,29 @@ private indirect enum ExpectedTypeNode {
     case tokens([TokenKind])
 }
 
-private struct ExpectedTupleElement {
+private struct ExpectedTupleElement: Sendable {
     let firstName: String?
     let secondName: String?
     let isVariadic: Bool
     let type: ExpectedTypeNode
 }
 
-private struct ExpectedFunctionParameter {
+private struct ExpectedFunctionParameter: Sendable {
     let isVariadic: Bool
     let type: ExpectedTypeNode
 }
 
-private struct ExpectedThrowsClause {
+private struct ExpectedThrowsClause: Sendable {
     let throwsSpecifier: String
     let errorType: ExpectedTypeNode?
 }
 
-private enum ExpectedGenericArgument {
+private enum ExpectedGenericArgument: Sendable {
     case type(ExpectedTypeNode)
     case expr([TokenKind])
 }
 
-private enum ExpectedSegmentArguments {
+private enum ExpectedSegmentArguments: Sendable {
     case none
     case arguments([ExpectedGenericArgument])
     case syntheticOptional(ExpectedTypeNode)
@@ -166,7 +166,7 @@ private enum ExpectedSegmentArguments {
     }
 }
 
-private struct ExpectedNominalSegment {
+private struct ExpectedNominalSegment: Sendable {
     let moduleSelector: String?
     let name: String
     let arguments: ExpectedSegmentArguments
@@ -184,7 +184,7 @@ private struct ExpectedNominalSegment {
     }
 }
 
-private struct ExpectedMemberChain {
+private struct ExpectedMemberChain: Sendable {
     let nonNominalBase: ExpectedTypeNode?
     let rawExpandedCount: Int
     let segments: [ExpectedNominalSegment]

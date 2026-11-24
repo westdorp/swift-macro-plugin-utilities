@@ -30,6 +30,7 @@ public struct MacroAttachedClassRequirements: Sendable {
     let mainActorReason: String
     let storedPropertyName: String
     let storedPropertyTypeName: String
+    let storedPropertyTypePattern: ExpectedTypePattern?
     let storedPropertyReason: String
     let initializerReason: String
     let diagnosticDomain: String
@@ -54,6 +55,7 @@ public struct MacroAttachedClassRequirements: Sendable {
         self.mainActorReason = mainActorReason
         self.storedPropertyName = storedPropertyName
         self.storedPropertyTypeName = storedPropertyTypeName
+        self.storedPropertyTypePattern = ExpectedTypePattern(parsing: storedPropertyTypeName)
         self.storedPropertyReason = storedPropertyReason
         self.initializerReason = initializerReason
         self.diagnosticDomain = diagnosticDomain
@@ -150,7 +152,7 @@ public struct MacroAttachedClassValidator {
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
-                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    what: "\(requirements.attributeName) requires a final class, but this class contains 'open' member declarations.",
                     why: requirements.lifecycleOwnershipReason,
                     how: how
                 )
@@ -208,31 +210,53 @@ public struct MacroAttachedClassValidator {
             )
             return false
         case .storedLetProperty:
-            guard !satisfies(.storedLetProperty) else {
+            switch storedLetPropertyState() {
+            case .satisfied:
                 return true
+            case .missing:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.storedPropertyRequired,
+                    what: "\(requirements.attributeName) requires a stored instance property 'let \(requirements.storedPropertyName): \(requirements.storedPropertyTypeName)'.",
+                    why: requirements.storedPropertyReason,
+                    how: "Add 'let \(requirements.storedPropertyName): \(requirements.storedPropertyTypeName)'."
+                )
+            case .invalidConfiguredType:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.storedPropertyRequired,
+                    what: "\(requirements.attributeName) cannot validate stored property '\(requirements.storedPropertyName)' because configured type '\(requirements.storedPropertyTypeName)' is not valid Swift type syntax.",
+                    why: "Macro requirements must specify parseable Swift type syntax to match declarations safely.",
+                    how: "Update the macro's configured storedPropertyTypeName to valid Swift type syntax."
+                )
             }
-            context.diagnose(
-                className,
-                domain: requirements.diagnosticDomain,
-                id: requirements.diagnosticIDs.storedPropertyRequired,
-                what: "\(requirements.attributeName) requires a stored instance property 'let \(requirements.storedPropertyName): \(requirements.storedPropertyTypeName)'.",
-                why: requirements.storedPropertyReason,
-                how: "Add 'let \(requirements.storedPropertyName): \(requirements.storedPropertyTypeName)'."
-            )
             return false
         case .initializerAvailability:
-            guard !satisfies(.initializerAvailability) else {
-                return true
-            }
             let initializer = "init(\(requirements.storedPropertyName):)"
-            context.diagnose(
-                className,
-                domain: requirements.diagnosticDomain,
-                id: requirements.diagnosticIDs.initializerConflict,
-                what: "\(requirements.attributeName) cannot synthesize '\(initializer)' because it is already declared.",
-                why: requirements.initializerReason,
-                how: "Remove the custom '\(initializer)' or remove \(requirements.attributeName) and manage wiring manually."
-            )
+            switch initializerAvailabilityState() {
+            case .available:
+                return true
+            case .conflicting:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.initializerConflict,
+                    what: "\(requirements.attributeName) cannot synthesize '\(initializer)' because it is already declared.",
+                    why: requirements.initializerReason,
+                    how: "Remove the custom '\(initializer)' or remove \(requirements.attributeName) and manage wiring manually."
+                )
+            case .invalidConfiguredType:
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.initializerConflict,
+                    what: "\(requirements.attributeName) cannot validate '\(initializer)' because configured type '\(requirements.storedPropertyTypeName)' is not valid Swift type syntax.",
+                    why: "Macro requirements must specify parseable Swift type syntax to detect conflicting initializers safely.",
+                    how: "Update the macro's configured storedPropertyTypeName to valid Swift type syntax."
+                )
+            }
             return false
         }
     }
@@ -255,17 +279,9 @@ public struct MacroAttachedClassValidator {
         case .mainActorIsolation:
             hasAttribute(named: "MainActor", in: classDeclaration.attributes)
         case .storedLetProperty:
-            hasStoredLetProperty(
-                named: requirements.storedPropertyName,
-                typeNamed: requirements.storedPropertyTypeName,
-                in: classDeclaration
-            )
+            storedLetPropertyState() == .satisfied
         case .initializerAvailability:
-            !hasConflictingInitializer(
-                parameterLabel: requirements.storedPropertyName,
-                parameterType: requirements.storedPropertyTypeName,
-                in: classDeclaration
-            )
+            initializerAvailabilityState() == .available
         }
     }
 
@@ -273,6 +289,40 @@ public struct MacroAttachedClassValidator {
     public func satisfies(_ requiredContracts: [MacroAttachedClassRequirement]) -> Bool {
         requiredContracts.allSatisfy { satisfies($0) }
     }
+
+    private func storedLetPropertyState() -> StoredLetPropertyState {
+        guard let pattern = requirements.storedPropertyTypePattern else {
+            return .invalidConfiguredType
+        }
+        return hasStoredLetProperty(
+            named: requirements.storedPropertyName,
+            typePattern: pattern,
+            in: classDeclaration
+        ) ? .satisfied : .missing
+    }
+
+    private func initializerAvailabilityState() -> InitializerAvailabilityState {
+        guard let pattern = requirements.storedPropertyTypePattern else {
+            return .invalidConfiguredType
+        }
+        return hasConflictingInitializer(
+            parameterLabel: requirements.storedPropertyName,
+            parameterTypePattern: pattern,
+            in: classDeclaration
+        ) ? .conflicting : .available
+    }
+}
+
+private enum StoredLetPropertyState {
+    case satisfied
+    case missing
+    case invalidConfiguredType
+}
+
+private enum InitializerAvailabilityState {
+    case available
+    case conflicting
+    case invalidConfiguredType
 }
 
 private enum FinalClassValidationState {
