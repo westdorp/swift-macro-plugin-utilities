@@ -27,7 +27,10 @@ public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String)
 
 /// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
-    guard let expectedPattern = ExpectedTypePattern(parsing: expectedTypeName) else {
+    guard let expectedPattern = ExpectedTypePattern(
+        parsing: expectedTypeName,
+        allowLegacyClassRestriction: true
+    ) else {
         return false
     }
 
@@ -37,12 +40,12 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
 struct ExpectedTypePattern: Sendable {
     private let root: ExpectedTypeNode
 
-    init?(parsing text: String) {
+    init?(parsing text: String, allowLegacyClassRestriction: Bool = false) {
         guard let trimmed = trimmedNonEmpty(text) else {
             return nil
         }
 
-        if trimmed == "class" {
+        if allowLegacyClassRestriction, trimmed == "class" {
             self.root = .classRestriction
             return
         }

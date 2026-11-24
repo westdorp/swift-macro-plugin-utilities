@@ -120,14 +120,14 @@ struct MacroAttachedClassValidationTests {
                 source: "@MainActor class Monitor { let player: AVPlayer; class Child: Monitor {} }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
+                message: "WHAT: @Observer can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
                 fixItMessages: []
             ),
             MissingRequirement(
                 source: "@MainActor public class Monitor { let player: AVPlayer; open class Nested {} }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
+                message: "WHAT: @Observer can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Lifecycle state requires stable identity. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually.",
                 fixItMessages: []
             ),
             MissingRequirement(
@@ -271,6 +271,7 @@ struct MacroAttachedClassValidationTests {
         "Unparseable configured type fails closed for stored property and initializer availability",
         arguments: [
             ("()asyncthrows->Void", "()asyncthrows->Void"),
+            ("class", "class"),
             ("[Int", "[Int"),
             ("", ""),
             ("   ", " "),
@@ -312,6 +313,7 @@ struct MacroAttachedClassValidationTests {
         )
         let context = BasicMacroExpansionContext(lexicalContext: [])
 
+        #expect(!hasStoredLetProperty(named: "action", typeNamed: configuredType, in: declaration))
         #expect(!hasConflictingInitializer(parameterLabel: "action", parameterType: configuredType, in: declaration))
         #expect(!validator.satisfies(.storedLetProperty))
         #expect(!validator.satisfies(.initializerAvailability))

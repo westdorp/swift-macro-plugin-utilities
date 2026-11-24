@@ -161,7 +161,7 @@ public struct MacroAttachedClassValidator {
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
-                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    what: "\(requirements.attributeName) can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations.",
                     why: requirements.lifecycleOwnershipReason,
                     how: "Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
                 )

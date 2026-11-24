@@ -63,7 +63,7 @@ context.diagnose(
     classDecl.name,
     domain: diagnosticDomain,
     id: RequireFinalDiagnosticID.missingFinal,
-    what: "@RequireFinal requires a final class.",
+    what: "@RequireFinal can only be applied to a final class.",
     why: "Subclasses would bypass the type's invariants.",
     how: "Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
     fixIts: [fixIt]
@@ -76,7 +76,7 @@ return []
 Attaching `@RequireFinal` to `class Session {}` produces:
 
 ```text
-error: WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.
+error: WHAT: @RequireFinal can only be applied to a final class. WHY: Subclasses would bypass the type's invariants. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.
 fix-it: Add 'final' modifier -> final class Session {}
 ```
 

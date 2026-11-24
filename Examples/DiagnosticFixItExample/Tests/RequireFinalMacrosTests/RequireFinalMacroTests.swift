@@ -89,7 +89,7 @@ struct RequireFinalMacroTests {
         #expect(diagnostic.diagMessage.severity == .error)
         #expect(
             diagnostic.message
-                == "WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration."
+                == "WHAT: @RequireFinal can only be applied to a final class. WHY: Subclasses would bypass the type's invariants. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration."
         )
         #expect(diagnostic.fixIts.count == 1)
 
@@ -269,7 +269,7 @@ struct RequireFinalMacroTests {
         #expect(diagnostic.diagMessage.severity == .error)
         #expect(
             diagnostic.message
-                == "WHAT: @RequireFinal requires a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Nested or local classes may subclass this class, which Swift forbids once 'final' is added. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
+                == "WHAT: @RequireFinal can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations. WHY: Nested or local classes may subclass this class, which Swift forbids once 'final' is added. HOW: Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
         )
         #expect(diagnostic.fixIts.isEmpty)
     }

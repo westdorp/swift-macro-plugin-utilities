@@ -90,7 +90,7 @@ public struct RequireFinalMacro: PeerMacro {
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.nestedClasses,
-                what: "@RequireFinal requires a final class, and omits the automatic fix-it when the class contains nested or local class declarations.",
+                what: "@RequireFinal can only be applied to a final class, and omits the automatic fix-it when the class contains nested or local class declarations.",
                 why: "Nested or local classes may subclass this class, which Swift forbids once 'final' is added.",
                 how: "Review nested or local classes, update any subclassing, and add the 'final' modifier manually."
             )
@@ -104,7 +104,7 @@ public struct RequireFinalMacro: PeerMacro {
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.missingFinal,
-                what: "@RequireFinal requires a final class.",
+                what: "@RequireFinal can only be applied to a final class.",
                 why: "Subclasses would bypass the type's invariants.",
                 how: "Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
                 fixIts: [fixIt]
