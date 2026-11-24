@@ -207,6 +207,10 @@ struct MacroDeclarationQueriesTests {
             ("(repeat each (T))", "(repeat each T)"),
             ("(repeat each T)", "(repeat each (T))"),
             ("Box<repeat each (T)>", "Box<repeat each T>"),
+            ("(any Swift.Error).Protocol", "(any Error).Protocol"),
+            ("any Swift.P & (Swift.Q & Swift.R)", "any P & Q & R"),
+            ("any (P & Q) & R", "P & (Q & R)"),
+            ("some P & (Q & ~Swift.Copyable)", "some P & Q & ~Copyable"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
@@ -279,6 +283,12 @@ struct MacroDeclarationQueriesTests {
             ("(any P & Q).Type", "(any ((any P) & Q)).Type"),
             ("any P & Q", "(any P) & Q"),
             ("(any P) & Q", "(any P) & Q"),
+            ("any P & (any Q & R)", "any P & Q & R"),
+            ("any P & Q & R", "any P & (any Q & R)"),
+            ("P.Protocol", "any P.Protocol"),
+            ("any P.Protocol", "P.Protocol"),
+            ("any P.Protocol", "any P.Protocol"),
+            ("any (P.Protocol).Type", "any (P.Protocol).Type"),
             ("(some P) & Q", "(some P) & Q"),
             ("P & ~(any Q)", "P & ~(any Q)"),
             ("P & ~(some Q)", "P & ~(some Q)"),

@@ -389,7 +389,8 @@ private func compileExpectedConstraintType(
     mode: TypeMatchMode
 ) -> ExpectedTypeNode? {
     if mode == .existentialConstraint,
-       let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
+       let metatype = unwrapped.as(MetatypeTypeSyntax.self),
+       metatype.metatypeSpecifier.text == "Type" {
         guard let compiledBase = compileExpectedType(metatype.baseType, mode: .existentialConstraint) else {
             return nil
         }
@@ -425,16 +426,33 @@ private func compileExpectedComposition(
 ) -> ExpectedTypeNode? {
     var elements: [ExpectedTypeNode] = []
     elements.reserveCapacity(composition.elements.count)
-    for element in composition.elements {
-        guard let compiledElement = compileExpectedType(
-            element.type,
-            mode: .opaqueOrCompositionConstraint
-        ) else {
-            return nil
-        }
-        elements.append(compiledElement)
+    guard appendExpectedCompositionElements(composition, to: &elements) else {
+        return nil
     }
     return .composition(elements)
+}
+
+private func appendExpectedCompositionElements(
+    _ composition: CompositionTypeSyntax,
+    to elements: inout [ExpectedTypeNode]
+) -> Bool {
+    for element in composition.elements {
+        let unwrappedElement = unwrapGrouping(element.type)
+        if let nestedComposition = unwrappedElement.as(CompositionTypeSyntax.self) {
+            guard appendExpectedCompositionElements(nestedComposition, to: &elements) else {
+                return false
+            }
+        } else {
+            guard let compiledElement = compileExpectedType(
+                unwrappedElement,
+                mode: .opaqueOrCompositionConstraint
+            ) else {
+                return false
+            }
+            elements.append(compiledElement)
+        }
+    }
+    return true
 }
 
 private func compileExpectedTupleElementType(
@@ -715,8 +733,9 @@ private func constraintTypeSyntaxMatches(
     switch expected {
     case .metatype(let expectedSpecifier, let expectedBase):
         guard mode == .existentialConstraint,
+              expectedSpecifier == "Type",
               let lhsMetatype = lhs.as(MetatypeTypeSyntax.self),
-              lhsMetatype.metatypeSpecifier.text == expectedSpecifier
+              lhsMetatype.metatypeSpecifier.text == "Type"
         else {
             return false
         }
@@ -760,17 +779,42 @@ private func compositionTypesMatch(
     _ lhs: CompositionTypeSyntax,
     _ expectedElements: [ExpectedTypeNode]
 ) -> Bool {
-    guard lhs.elements.count == expectedElements.count else {
+    var index = 0
+    guard matchCompositionElements(lhs, expectedElements: expectedElements, index: &index) else {
         return false
     }
+    return index == expectedElements.count
+}
 
-    return zip(lhs.elements, expectedElements).allSatisfy { lElement, expectedElement in
-        typeSyntaxMatches(
-            lElement.type,
-            expectedElement,
-            mode: .opaqueOrCompositionConstraint
-        )
+private func matchCompositionElements(
+    _ lhs: CompositionTypeSyntax,
+    expectedElements: [ExpectedTypeNode],
+    index: inout Int
+) -> Bool {
+    for element in lhs.elements {
+        let unwrappedElement = unwrapGrouping(element.type)
+        if let nestedComposition = unwrappedElement.as(CompositionTypeSyntax.self) {
+            guard matchCompositionElements(
+                nestedComposition,
+                expectedElements: expectedElements,
+                index: &index
+            ) else {
+                return false
+            }
+        } else {
+            guard index < expectedElements.count,
+                  typeSyntaxMatches(
+                      unwrappedElement,
+                      expectedElements[index],
+                      mode: .opaqueOrCompositionConstraint
+                  )
+            else {
+                return false
+            }
+            index += 1
+        }
     }
+    return true
 }
 
 private func isValidConstraintMemberBase(_ base: TypeSyntax?) -> Bool {

@@ -272,6 +272,7 @@ struct MacroAttachedClassValidationTests {
         arguments: [
             ("()asyncthrows->Void", "()asyncthrows->Void"),
             ("class", "class"),
+            ("any P.Protocol", "any P.Protocol"),
             ("[Int", "[Int"),
             ("", ""),
             ("   ", " "),
