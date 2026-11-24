@@ -204,6 +204,9 @@ struct MacroDeclarationQueriesTests {
             ("Swift.Int", "  Int \n\t "),
             ("@Sendable nonisolated(nonsending) () -> Swift.Int", "@Sendable nonisolated(nonsending) () -> Int"),
             ("@Example(1 + +2) () -> Swift.Void", "@Example(1 + +2) () -> Void"),
+            ("(repeat each (T))", "(repeat each T)"),
+            ("(repeat each T)", "(repeat each (T))"),
+            ("Box<repeat each (T)>", "Box<repeat each T>"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
@@ -252,6 +255,8 @@ struct MacroDeclarationQueriesTests {
             ("MyModule.Optional<Int,>", "Optional<Int,>"),
             ("Box<(repeat each T)>", "Box<repeat each T>"),
             ("Box<repeat each T>", "Box<(repeat each T)>"),
+            ("Box<(repeat each (T))>", "Box<repeat each T>"),
+            ("Box<repeat each (T)>", "Box<(repeat each T)>"),
             ("[Swift.Int].Index", "Index"),
             ("any ~(any Copyable)", "any ~(any Copyable)"),
             ("any ~(some Copyable)", "any ~(some Copyable)"),

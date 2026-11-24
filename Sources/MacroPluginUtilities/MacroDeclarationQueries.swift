@@ -120,6 +120,7 @@ private indirect enum ExpectedTypeNode: Sendable {
         base: ExpectedTypeNode
     )
     case packExpansion(ExpectedTypeNode)
+    case packElement(ExpectedTypeNode)
     case suppressed(ExpectedTypeNode)
     case classRestriction
     case memberChain(ExpectedMemberChain)
@@ -357,6 +358,13 @@ private func compileExpectedType(
             return nil
         }
         return .packExpansion(compiledPattern)
+    }
+
+    if let packElement = unwrapped.as(PackElementTypeSyntax.self) {
+        guard let compiledPack = compileExpectedType(packElement.pack, mode: .exact) else {
+            return nil
+        }
+        return .packElement(compiledPack)
     }
 
     if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
@@ -656,6 +664,11 @@ private func typeSyntaxMatches(
             return false
         }
         return typeSyntaxMatches(lhsPackExpansion.repetitionPattern, expectedPattern, mode: .normal)
+    case .packElement(let expectedPack):
+        guard let lhsPackElement = lhs.as(PackElementTypeSyntax.self) else {
+            return false
+        }
+        return typeSyntaxMatches(lhsPackElement.pack, expectedPack, mode: .exact)
     case .suppressed(let expectedInner):
         guard let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self) else {
             return false
@@ -683,6 +696,7 @@ private func typeSyntaxMatches(
               !lhs.is(FunctionTypeSyntax.self),
               !lhs.is(AttributedTypeSyntax.self),
               !lhs.is(PackExpansionTypeSyntax.self),
+              !lhs.is(PackElementTypeSyntax.self),
               !lhs.is(SuppressedTypeSyntax.self),
               !lhs.is(ClassRestrictionTypeSyntax.self),
               memberTypeChain(for: lhs) == nil

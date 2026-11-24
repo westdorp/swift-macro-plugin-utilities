@@ -193,6 +193,8 @@ struct MacroPropertyQueriesTests {
             ("init(value: (_ x: Swift.Int) -> Void) {}", "(Int)->Void", true),
             ("init(value: [Swift.Int].Index) {}", "[Int].Index", true),
             ("init(value: Box<(repeat each T)>) {}", "Box<repeat each T>", false),
+            ("init(value: (repeat each (T))) {}", "(repeat each T)", true),
+            ("init(value: Box<(repeat each (T))>) {}", "Box<repeat each T>", false),
             ("init(value: Namespace.Swift.Optional<Int>) {}", "Swift.Optional<Int>", false),
             ("init(value: Namespace.Swift.Optional<Int>.Marker) {}", "Swift.Optional<Int>.Marker", false),
             ("init(value: Shapes.Optional<4>) {}", "Optional<4>", true),
