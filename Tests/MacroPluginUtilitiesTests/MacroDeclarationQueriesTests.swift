@@ -59,9 +59,12 @@ struct MacroDeclarationQueriesTests {
             ("someModule.Error", "Error"),
             ("Swift.Int.Type", "Int.Type"),
             ("Swift.Int.Type?", "Int.Type?"),
+            ("Optional<Int>.Type", "Optional<Int>.Type"),
+            ("Swift.Optional<Int>.Type", "Optional<Int>.Type"),
             ("Swift.Int!", "Int!"),
             ("(any Swift.Error)!", "Error!"),
-            ("(any Swift.Error).Type", "Error.Type"),
+            ("any Swift.Error.Type", "Error.Type"),
+            ("(any Error).Type", "(any Error).Type"),
             ("Dictionary < String, Int >", "Dictionary<String,Int>"),
         ]
     )
@@ -82,6 +85,9 @@ struct MacroDeclarationQueriesTests {
             ("borrowing some Swift.Error", "Error"),
             ("(some Swift.Error)?", "Error?"),
             ("(some Swift.Error).Type", "Error.Type"),
+            ("(any Error).Type", "Error.Type"),
+            ("(any Swift.Error).Type", "Error.Type"),
+            ("any Error.Type", "(any Error).Type"),
             ("Swift.Int.Type", "Type"),
             ("Swift.Int.Type?", "Type?"),
             ("Swift.Int.Protocol", "Protocol"),

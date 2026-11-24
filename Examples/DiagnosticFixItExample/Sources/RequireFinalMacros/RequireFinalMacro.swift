@@ -59,8 +59,8 @@ public struct RequireFinalMacro: PeerMacro {
         }
 
         if hasVisibleNestedSubclass(
-            in: classDecl.memberBlock.members,
-            superclassName: classDecl.name.text
+            in: classDecl,
+            lexicalContext: context.lexicalContext
         ) {
             context.diagnose(
                 classDecl.name,
@@ -116,55 +116,95 @@ private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
 }
 
 private func hasVisibleNestedSubclass(
-    in members: MemberBlockItemListSyntax,
-    superclassName: String
+    in classDecl: ClassDeclSyntax,
+    lexicalContext: [Syntax]
 ) -> Bool {
-    for member in members {
-        if let ifConfig = member.decl.as(IfConfigDeclSyntax.self) {
-            for clause in ifConfig.clauses {
-                if case .decls(let conditionalMembers) = clause.elements,
-                   hasVisibleNestedSubclass(
-                       in: conditionalMembers,
-                       superclassName: superclassName
-                   ) {
-                    return true
-                }
-            }
-            continue
-        }
-
-        if let nestedClass = member.decl.as(ClassDeclSyntax.self),
-           inheritsFromClass(named: superclassName, in: nestedClass) {
-            return true
-        }
-
-        if let nestedGroup = member.decl.asProtocol(DeclGroupSyntax.self),
-           hasVisibleNestedSubclass(
-               in: nestedGroup.memberBlock.members,
-               superclassName: superclassName
-           ) {
-            return true
-        }
-    }
-
-    return false
+    let attachedPath = enclosingTypeComponents(
+        for: classDecl,
+        lexicalContext: lexicalContext
+    ) + [classDecl.name.text]
+    let finder = NestedSubclassFinder(attachedPath: attachedPath)
+    finder.walk(classDecl.memberBlock)
+    return finder.found
 }
 
-private func inheritsFromClass(
-    named superclassName: String,
-    in classDecl: ClassDeclSyntax
-) -> Bool {
-    guard let inheritedTypes = classDecl.inheritanceClause?.inheritedTypes else {
-        return false
+private final class NestedSubclassFinder: SyntaxVisitor {
+    let attachedPath: [String]
+    var found = false
+
+    init(attachedPath: [String]) {
+        self.attachedPath = attachedPath
+        super.init(viewMode: .sourceAccurate)
     }
 
-    return inheritedTypes.contains { inherited in
-        if let identifier = inherited.type.as(IdentifierTypeSyntax.self) {
-            return identifier.name.text == superclassName
+    override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
+        if let inheritedTypes = node.inheritanceClause?.inheritedTypes,
+           inheritedTypes.contains(where: { matchesAttachedPath($0.type, attachedPath: attachedPath) }) {
+            found = true
+            return .skipChildren
         }
-        if let member = inherited.type.as(MemberTypeSyntax.self) {
-            return member.name.text == superclassName
-        }
+        return found ? .skipChildren : .visitChildren
+    }
+}
+
+private func matchesAttachedPath(_ type: TypeSyntax, attachedPath: [String]) -> Bool {
+    guard let components = nominalPathComponents(for: type),
+          !components.isEmpty,
+          components.count <= attachedPath.count
+    else {
         return false
     }
+    return Array(attachedPath.suffix(components.count)) == components
+}
+
+private func enclosingTypeComponents(
+    for classDecl: ClassDeclSyntax,
+    lexicalContext: [Syntax]
+) -> [String] {
+    var components: [String] = []
+    if let parent = Syntax(classDecl).parent {
+        var current: Syntax? = parent
+        while let node = current {
+            components.insert(contentsOf: enclosingComponents(for: node), at: 0)
+            current = node.parent
+        }
+    } else {
+        for node in lexicalContext {
+            components.insert(contentsOf: enclosingComponents(for: node), at: 0)
+        }
+    }
+    return components
+}
+
+private func enclosingComponents(for syntax: Syntax) -> [String] {
+    if let extensionDecl = syntax.as(ExtensionDeclSyntax.self) {
+        return nominalPathComponents(for: extensionDecl.extendedType) ?? []
+    }
+    if let classDecl = syntax.as(ClassDeclSyntax.self) {
+        return [classDecl.name.text]
+    }
+    if let structDecl = syntax.as(StructDeclSyntax.self) {
+        return [structDecl.name.text]
+    }
+    if let enumDecl = syntax.as(EnumDeclSyntax.self) {
+        return [enumDecl.name.text]
+    }
+    if let actorDecl = syntax.as(ActorDeclSyntax.self) {
+        return [actorDecl.name.text]
+    }
+    if let protocolDecl = syntax.as(ProtocolDeclSyntax.self) {
+        return [protocolDecl.name.text]
+    }
+    return []
+}
+
+private func nominalPathComponents(for type: TypeSyntax) -> [String]? {
+    if let identifier = type.as(IdentifierTypeSyntax.self) {
+        return [identifier.name.text]
+    }
+    if let member = type.as(MemberTypeSyntax.self),
+       let baseComponents = nominalPathComponents(for: member.baseType) {
+        return baseComponents + [member.name.text]
+    }
+    return nil
 }

@@ -90,13 +90,18 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
         guard expected.hasSuffix(suffix) else {
             return false
         }
-        return qualifiedTypeMatches(
+        return qualifiedNominalMatches(
             metatype.baseType,
             expected: String(expected.dropLast(suffix.count))
         )
     }
 
-    guard let memberType = type.as(MemberTypeSyntax.self),
+    return qualifiedNominalMatches(type, expected: expected)
+}
+
+private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bool {
+    guard !expected.isEmpty,
+          let memberType = type.as(MemberTypeSyntax.self),
           isNominalChain(memberType.baseType)
     else {
         return false
@@ -173,10 +178,6 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
     if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
        someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
         return normalizedTypeText(someOrAnyType.constraint)
-    }
-
-    if let metatype = type.as(MetatypeTypeSyntax.self) {
-        return normalizedPostfixBaseText(metatype.baseType) + "." + metatype.metatypeSpecifier.text
     }
 
     return normalizedTokenText(type)

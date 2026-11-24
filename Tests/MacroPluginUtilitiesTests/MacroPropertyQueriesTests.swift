@@ -156,6 +156,11 @@ struct MacroPropertyQueriesTests {
         arguments: [
             ("init(value: Swift.Int.Type) {}", "Int.Type", true),
             ("init(value: Int.Type) {}", "Int.Type", true),
+            ("init(value: Optional<Int>.Type) {}", "Optional<Int>.Type", true),
+            ("init(value: Swift.Optional<Int>.Type) {}", "Optional<Int>.Type", true),
+            ("init(value: any P.Type) {}", "P.Type", true),
+            ("init(value: (any P).Type) {}", "P.Type", false),
+            ("init(value: any P.Type) {}", "(any P).Type", false),
             ("init(value: Swift.Int!) {}", "Int!", true),
             ("init(value: Swift.Int.Type) {}", "Type", false),
             ("init(value: ((Int) -> Swift.Int).Type) {}", "(Int)->Swift.Int.Type", false),

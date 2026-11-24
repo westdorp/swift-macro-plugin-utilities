@@ -67,6 +67,10 @@ struct RequireFinalMacroTests {
                 "@RequireFinal\npublic class Session {\n    open class Nested {}\n}\n",
                 "@RequireFinal\npublic final class Session {\n    open class Nested {}\n}\n"
             ),
+            (
+                "enum Other { class Session {} }\n@RequireFinal\nclass Session {\n    class Child: Other.Session {}\n}\n",
+                "enum Other { class Session {} }\n@RequireFinal\nfinal class Session {\n    class Child: Other.Session {}\n}\n"
+            ),
         ]
     )
     func nonFinalClassEmitsStructuredDiagnosticAndFixIt(
@@ -185,6 +189,23 @@ struct RequireFinalMacroTests {
                 }
             }
             """,
+            """
+            @RequireFinal
+            class Session {
+                func make() {
+                    class Child: Session {}
+                    _ = Child()
+                }
+            }
+            """,
+            """
+            enum Outer {
+                @RequireFinal
+                class Session {
+                    class Child: Outer.Session {}
+                }
+            }
+            """,
         ]
     )
     func classWithNestedSubclassSuppressesSingleModifierFixIt(source: String) throws {
@@ -277,7 +298,12 @@ private func expand(_ source: String) -> ExpansionResult {
     )
     _ = sourceFile.expand(
         macros: ["RequireFinal": RequireFinalMacro.self],
-        contextGenerator: { _ in context },
+        contextGenerator: { syntax in
+            BasicMacroExpansionContext(
+                sharingWith: context,
+                lexicalContext: syntax.allMacroLexicalContexts()
+            )
+        },
         indentationWidth: .spaces(4)
     )
     return ExpansionResult(
