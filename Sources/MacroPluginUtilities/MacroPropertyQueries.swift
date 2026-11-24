@@ -21,7 +21,7 @@ public func hasStoredLetProperty(
     typeNamed typeName: String,
     in classDecl: ClassDeclSyntax
 ) -> Bool {
-    guard let expectedType = parseExpectedType(typeName) else {
+    guard let expectedPattern = ExpectedTypePattern(parsing: typeName) else {
         return false
     }
 
@@ -42,7 +42,7 @@ public func hasStoredLetProperty(
                 return false
             }
 
-            return typeMatches(typeAnnotation.type, expectedType: expectedType)
+            return expectedPattern.matches(typeAnnotation.type)
         }
     }
 }
@@ -108,7 +108,7 @@ public func hasConflictingInitializer(
     parameterType: String,
     in classDecl: ClassDeclSyntax
 ) -> Bool {
-    guard let expectedType = parseExpectedType(parameterType) else {
+    guard let expectedPattern = ExpectedTypePattern(parsing: parameterType) else {
         return false
     }
 
@@ -125,6 +125,6 @@ public func hasConflictingInitializer(
             return false
         }
 
-        return typeMatches(parameter.type, expectedType: expectedType)
+        return expectedPattern.matches(parameter.type)
     }
 }

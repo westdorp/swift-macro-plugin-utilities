@@ -27,22 +27,36 @@ public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String)
 
 /// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
-    guard let expectedType = parseExpectedType(expectedTypeName) else {
+    guard let expectedPattern = ExpectedTypePattern(parsing: expectedTypeName) else {
         return false
     }
 
-    return typeMatches(type, expectedType: expectedType)
+    return expectedPattern.matches(type)
 }
 
-func typeMatches(_ type: TypeSyntax, expectedType: TypeSyntax) -> Bool {
-    guard !type.hasError else {
-        return false
+struct ExpectedTypePattern {
+    private let root: ExpectedTypeNode
+
+    init?(parsing text: String) {
+        guard let parsed = parseExpectedType(text),
+              let compiled = compileExpectedType(parsed, mode: .normal)
+        else {
+            return nil
+        }
+
+        self.root = compiled
     }
 
-    return typeSyntaxMatches(type, expectedType, mode: .normal)
+    func matches(_ type: TypeSyntax) -> Bool {
+        guard !type.hasError else {
+            return false
+        }
+
+        return typeSyntaxMatches(type, root, mode: .normal)
+    }
 }
 
-func parseExpectedType(_ text: String) -> TypeSyntax? {
+private func parseExpectedType(_ text: String) -> TypeSyntax? {
     guard let firstNonWhitespace = text.firstIndex(where: { !$0.isWhitespace }),
           let lastNonWhitespace = text.lastIndex(where: { !$0.isWhitespace })
     else {
@@ -67,242 +81,660 @@ private enum TypeMatchMode {
     case nominalConstraint
 }
 
-private func typeSyntaxMatches(
-    _ actual: TypeSyntax,
-    _ expected: TypeSyntax,
+private indirect enum ExpectedTypeNode {
+    case existential(ExpectedTypeNode)
+    case opaque(ExpectedTypeNode)
+    case optional(ExpectedTypeNode)
+    case iuo(ExpectedTypeNode)
+    case metatype(specifier: String, base: ExpectedTypeNode)
+    case composition([ExpectedTypeNode])
+    case array(ExpectedTypeNode)
+    case dictionary(key: ExpectedTypeNode, value: ExpectedTypeNode)
+    case inlineArray(count: ExpectedGenericArgument, element: ExpectedGenericArgument)
+    case tuple([ExpectedTupleElement])
+    case function(
+        parameters: [ExpectedFunctionParameter],
+        asyncSpecifier: String?,
+        throwsClause: ExpectedThrowsClause?,
+        returnType: ExpectedTypeNode
+    )
+    case attributed(
+        specifiers: String,
+        attributes: String,
+        lateSpecifiers: String,
+        base: ExpectedTypeNode
+    )
+    case packExpansion(ExpectedTypeNode)
+    case suppressed(ExpectedTypeNode)
+    case memberChain(ExpectedMemberChain)
+    case tokenText(String)
+}
+
+private struct ExpectedTupleElement {
+    let firstName: String?
+    let secondName: String?
+    let isVariadic: Bool
+    let type: ExpectedTypeNode
+}
+
+private struct ExpectedFunctionParameter {
+    let isVariadic: Bool
+    let type: ExpectedTypeNode
+}
+
+private struct ExpectedThrowsClause {
+    let throwsSpecifier: String
+    let errorType: ExpectedTypeNode?
+}
+
+private enum ExpectedGenericArgument {
+    case type(ExpectedTypeNode)
+    case expr(String)
+}
+
+private enum ExpectedSegmentArguments {
+    case none
+    case arguments([ExpectedGenericArgument])
+    case syntheticOptional(ExpectedTypeNode)
+
+    var isEmpty: Bool {
+        if case .none = self {
+            return true
+        }
+        return false
+    }
+
+    var singleTypeArgument: ExpectedTypeNode? {
+        switch self {
+        case .none:
+            nil
+        case .arguments(let arguments):
+            if arguments.count == 1, case .type(let type) = arguments[0] {
+                type
+            } else {
+                nil
+            }
+        case .syntheticOptional(let wrappedType):
+            wrappedType
+        }
+    }
+}
+
+private struct ExpectedNominalSegment {
+    let moduleSelector: String?
+    let name: String
+    let arguments: ExpectedSegmentArguments
+
+    var isUnqualifiedStandardOptional: Bool {
+        moduleSelector == nil && name == "Optional" && arguments.singleTypeArgument != nil
+    }
+
+    var isSwiftQualifiedStandardOptional: Bool {
+        moduleSelector == "Swift" && name == "Optional" && arguments.singleTypeArgument != nil
+    }
+
+    var isStandardOptional: Bool {
+        isUnqualifiedStandardOptional || isSwiftQualifiedStandardOptional
+    }
+
+    var isPlainSwiftNamespace: Bool {
+        moduleSelector == nil && name == "Swift" && arguments.isEmpty
+    }
+}
+
+private struct ExpectedMemberChain {
+    let nonNominalBase: ExpectedTypeNode?
+    let rawExpandedCount: Int
+    let segments: [ExpectedNominalSegment]
+    let hadLeadingSelector: Bool
+    let hasParenthesizedTypeOwner: Bool
+}
+
+private func compileExpectedType(
+    _ type: TypeSyntax,
     mode: TypeMatchMode
-) -> Bool {
-    let lhs = unwrapGrouping(actual)
-    let rhs = unwrapGrouping(expected)
+) -> ExpectedTypeNode? {
+    let unwrapped = unwrapGrouping(type)
 
     switch mode {
     case .existentialConstraint, .opaqueOrCompositionConstraint, .nominalConstraint:
-        return constraintTypeSyntaxMatches(lhs, rhs, mode: mode)
+        return compileExpectedConstraintType(unwrapped, mode: mode)
+    case .normal, .exact:
+        break
+    }
+
+    if let existential = existentialConstraint(of: unwrapped) {
+        guard let compiledConstraint = compileExpectedType(existential, mode: .existentialConstraint) else {
+            return nil
+        }
+        return .existential(compiledConstraint)
+    }
+
+    if let opaque = opaqueConstraint(of: unwrapped) {
+        guard let compiledConstraint = compileExpectedType(opaque, mode: .opaqueOrCompositionConstraint) else {
+            return nil
+        }
+        return .opaque(compiledConstraint)
+    }
+
+    if let wrapped = standardOptionalWrappedType(unwrapped) {
+        guard let compiledWrapped = compileExpectedType(wrapped, mode: .normal) else {
+            return nil
+        }
+        return .optional(compiledWrapped)
+    }
+
+    if let iuo = unwrapped.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+        guard let compiledWrapped = compileExpectedType(iuo.wrappedType, mode: .normal) else {
+            return nil
+        }
+        return .iuo(compiledWrapped)
+    }
+
+    if let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
+        guard let compiledBase = compileExpectedType(metatype.baseType, mode: .exact) else {
+            return nil
+        }
+        return .metatype(specifier: metatype.metatypeSpecifier.text, base: compiledBase)
+    }
+
+    if let composition = unwrapped.as(CompositionTypeSyntax.self) {
+        return compileExpectedComposition(composition)
+    }
+
+    if let array = unwrapped.as(ArrayTypeSyntax.self) {
+        guard let compiledElement = compileExpectedType(array.element, mode: .normal) else {
+            return nil
+        }
+        return .array(compiledElement)
+    }
+
+    if let dictionary = unwrapped.as(DictionaryTypeSyntax.self) {
+        guard let compiledKey = compileExpectedType(dictionary.key, mode: .normal),
+              let compiledValue = compileExpectedType(dictionary.value, mode: .normal)
+        else {
+            return nil
+        }
+        return .dictionary(key: compiledKey, value: compiledValue)
+    }
+
+    if let inlineArray = unwrapped.as(InlineArrayTypeSyntax.self) {
+        guard let compiledCount = compileExpectedGenericArgument(inlineArray.count.argument),
+              let compiledElement = compileExpectedGenericArgument(inlineArray.element.argument)
+        else {
+            return nil
+        }
+        return .inlineArray(count: compiledCount, element: compiledElement)
+    }
+
+    if let tuple = unwrapped.as(TupleTypeSyntax.self) {
+        var elements: [ExpectedTupleElement] = []
+        elements.reserveCapacity(tuple.elements.count)
+        for element in tuple.elements {
+            guard let compiledType = compileExpectedTupleElementType(element) else {
+                return nil
+            }
+            elements.append(
+                ExpectedTupleElement(
+                    firstName: element.firstName?.text,
+                    secondName: element.secondName?.text,
+                    isVariadic: element.ellipsis != nil,
+                    type: compiledType
+                )
+            )
+        }
+        return .tuple(elements)
+    }
+
+    if let function = unwrapped.as(FunctionTypeSyntax.self) {
+        var parameters: [ExpectedFunctionParameter] = []
+        parameters.reserveCapacity(function.parameters.count)
+        for parameter in function.parameters {
+            guard isValidFunctionParameterLabel(parameter),
+                  let compiledType = compileExpectedTupleElementType(parameter)
+            else {
+                return nil
+            }
+            parameters.append(
+                ExpectedFunctionParameter(
+                    isVariadic: parameter.ellipsis != nil,
+                    type: compiledType
+                )
+            )
+        }
+
+        let throwsClause: ExpectedThrowsClause?
+        if let rawThrows = function.effectSpecifiers?.throwsClause {
+            if let rawErrorType = rawThrows.type {
+                guard let compiledErrorType = compileExpectedType(rawErrorType, mode: .normal) else {
+                    return nil
+                }
+                throwsClause = ExpectedThrowsClause(
+                    throwsSpecifier: rawThrows.throwsSpecifier.text,
+                    errorType: compiledErrorType
+                )
+            } else {
+                throwsClause = ExpectedThrowsClause(
+                    throwsSpecifier: rawThrows.throwsSpecifier.text,
+                    errorType: nil
+                )
+            }
+        } else {
+            throwsClause = nil
+        }
+
+        guard let compiledReturnType = compileExpectedType(function.returnClause.type, mode: .normal) else {
+            return nil
+        }
+
+        return .function(
+            parameters: parameters,
+            asyncSpecifier: function.effectSpecifiers?.asyncSpecifier?.text,
+            throwsClause: throwsClause,
+            returnType: compiledReturnType
+        )
+    }
+
+    if let attributed = unwrapped.as(AttributedTypeSyntax.self) {
+        guard let compiledBase = compileExpectedType(attributed.baseType, mode: mode) else {
+            return nil
+        }
+        return .attributed(
+            specifiers: normalizedTokenText(attributed.specifiers),
+            attributes: normalizedTokenText(attributed.attributes),
+            lateSpecifiers: normalizedTokenText(attributed.lateSpecifiers),
+            base: compiledBase
+        )
+    }
+
+    if let packExpansion = unwrapped.as(PackExpansionTypeSyntax.self) {
+        guard let compiledPattern = compileExpectedType(packExpansion.repetitionPattern, mode: .normal) else {
+            return nil
+        }
+        return .packExpansion(compiledPattern)
+    }
+
+    if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
+        guard let compiledInner = compileExpectedType(suppressed.type, mode: .nominalConstraint) else {
+            return nil
+        }
+        return .suppressed(compiledInner)
+    }
+
+    if let chain = memberTypeChain(for: unwrapped) {
+        guard let compiledChain = compileExpectedMemberChain(chain) else {
+            return nil
+        }
+        return .memberChain(compiledChain)
+    }
+
+    return .tokenText(normalizedTokenText(unwrapped))
+}
+
+private func compileExpectedConstraintType(
+    _ unwrapped: TypeSyntax,
+    mode: TypeMatchMode
+) -> ExpectedTypeNode? {
+    if mode == .existentialConstraint,
+       let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
+        guard let compiledBase = compileExpectedType(metatype.baseType, mode: .existentialConstraint) else {
+            return nil
+        }
+        return .metatype(specifier: metatype.metatypeSpecifier.text, base: compiledBase)
+    }
+
+    if mode != .nominalConstraint,
+       let composition = unwrapped.as(CompositionTypeSyntax.self) {
+        return compileExpectedComposition(composition)
+    }
+
+    if mode != .nominalConstraint,
+       let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
+        guard let compiledInner = compileExpectedType(suppressed.type, mode: .nominalConstraint) else {
+            return nil
+        }
+        return .suppressed(compiledInner)
+    }
+
+    guard standardOptionalWrappedType(unwrapped) == nil,
+          let chain = memberTypeChain(for: unwrapped),
+          isValidConstraintMemberBase(chain.nonNominalBase),
+          let compiledChain = compileExpectedMemberChain(chain)
+    else {
+        return nil
+    }
+
+    return .memberChain(compiledChain)
+}
+
+private func compileExpectedComposition(
+    _ composition: CompositionTypeSyntax
+) -> ExpectedTypeNode? {
+    var elements: [ExpectedTypeNode] = []
+    elements.reserveCapacity(composition.elements.count)
+    for element in composition.elements {
+        guard let compiledElement = compileExpectedType(
+            element.type,
+            mode: .opaqueOrCompositionConstraint
+        ) else {
+            return nil
+        }
+        elements.append(compiledElement)
+    }
+    return .composition(elements)
+}
+
+private func compileExpectedTupleElementType(
+    _ element: TupleTypeElementSyntax
+) -> ExpectedTypeNode? {
+    guard element.inoutKeyword != nil else {
+        return compileExpectedType(element.type, mode: .normal)
+    }
+
+    let parts = splitTupleElementType(element)
+    guard let compiledBase = compileExpectedType(parts.baseType, mode: .normal) else {
+        return nil
+    }
+    return .attributed(
+        specifiers: parts.specifiers,
+        attributes: parts.attributes,
+        lateSpecifiers: parts.lateSpecifiers,
+        base: compiledBase
+    )
+}
+
+private func compileExpectedGenericArgument(
+    _ argument: GenericArgumentSyntax.Argument
+) -> ExpectedGenericArgument? {
+    switch argument {
+    case .type(let type):
+        guard let compiledType = compileExpectedType(type, mode: .normal) else {
+            return nil
+        }
+        return .type(compiledType)
+    case .expr(let expr):
+        return .expr(normalizedTokenText(expr))
+    }
+}
+
+private func compileExpectedMemberChain(
+    _ chain: MemberTypeChain
+) -> ExpectedMemberChain? {
+    if let nonNominalBase = chain.nonNominalBase {
+        guard let compiledBase = compileExpectedType(nonNominalBase, mode: .exact),
+              let compiledSegments = compileExpectedSegments(chain.segments)
+        else {
+            return nil
+        }
+        return ExpectedMemberChain(
+            nonNominalBase: compiledBase,
+            rawExpandedCount: compiledSegments.count,
+            segments: compiledSegments,
+            hadLeadingSelector: false,
+            hasParenthesizedTypeOwner: false
+        )
+    }
+
+    let (expanded, hadLeadingSelector) = expandLeadingModuleSelector(chain.segments)
+    let hasParenthesizedTypeOwner = chain.rootWasParenthesized && !hadLeadingSelector
+    let canonical = hasParenthesizedTypeOwner
+        ? expanded
+        : canonicalizeLeadingStandardOptional(expanded)
+    guard let compiledSegments = compileExpectedSegments(canonical) else {
+        return nil
+    }
+    return ExpectedMemberChain(
+        nonNominalBase: nil,
+        rawExpandedCount: expanded.count,
+        segments: compiledSegments,
+        hadLeadingSelector: hadLeadingSelector,
+        hasParenthesizedTypeOwner: hasParenthesizedTypeOwner
+    )
+}
+
+private func compileExpectedSegments(
+    _ segments: [NominalASTSegment]
+) -> [ExpectedNominalSegment]? {
+    var compiled: [ExpectedNominalSegment] = []
+    compiled.reserveCapacity(segments.count)
+    for segment in segments {
+        let arguments: ExpectedSegmentArguments
+        switch segment.arguments {
+        case .none:
+            arguments = .none
+        case .syntax(let clause):
+            var compiledArguments: [ExpectedGenericArgument] = []
+            compiledArguments.reserveCapacity(clause.arguments.count)
+            for argument in clause.arguments {
+                guard let compiledArgument = compileExpectedGenericArgument(argument.argument) else {
+                    return nil
+                }
+                compiledArguments.append(compiledArgument)
+            }
+            arguments = .arguments(compiledArguments)
+        case .syntheticOptional(let wrappedType):
+            guard let compiledWrapped = compileExpectedType(wrappedType, mode: .normal) else {
+                return nil
+            }
+            arguments = .syntheticOptional(compiledWrapped)
+        }
+        compiled.append(
+            ExpectedNominalSegment(
+                moduleSelector: segment.moduleSelector,
+                name: segment.name,
+                arguments: arguments
+            )
+        )
+    }
+    return compiled
+}
+
+private func typeSyntaxMatches(
+    _ actual: TypeSyntax,
+    _ expected: ExpectedTypeNode,
+    mode: TypeMatchMode
+) -> Bool {
+    let lhs = unwrapGrouping(actual)
+
+    switch mode {
+    case .existentialConstraint, .opaqueOrCompositionConstraint, .nominalConstraint:
+        return constraintTypeSyntaxMatches(lhs, expected, mode: mode)
     case .normal:
         let lhsExistential = existentialConstraint(of: lhs)
-        let rhsExistential = existentialConstraint(of: rhs)
-        if let lhsConstraint = lhsExistential, let rhsConstraint = rhsExistential {
-            return typeSyntaxMatches(lhsConstraint, rhsConstraint, mode: .existentialConstraint)
+        if case .existential(let expectedConstraint) = expected {
+            if let lhsConstraint = lhsExistential {
+                return typeSyntaxMatches(lhsConstraint, expectedConstraint, mode: .existentialConstraint)
+            }
+            return typeSyntaxMatches(lhs, expectedConstraint, mode: .existentialConstraint)
         }
         if let lhsConstraint = lhsExistential {
-            return typeSyntaxMatches(lhsConstraint, rhs, mode: .existentialConstraint)
-        }
-        if let rhsConstraint = rhsExistential {
-            return typeSyntaxMatches(lhs, rhsConstraint, mode: .existentialConstraint)
+            return typeSyntaxMatches(lhsConstraint, expected, mode: .existentialConstraint)
         }
     case .exact:
         let lhsExistential = existentialConstraint(of: lhs)
-        let rhsExistential = existentialConstraint(of: rhs)
-        if lhsExistential != nil || rhsExistential != nil {
-            guard let lhsConstraint = lhsExistential, let rhsConstraint = rhsExistential else {
+        if case .existential(let expectedConstraint) = expected {
+            guard let lhsConstraint = lhsExistential else {
                 return false
             }
-            return typeSyntaxMatches(lhsConstraint, rhsConstraint, mode: .existentialConstraint)
+            return typeSyntaxMatches(lhsConstraint, expectedConstraint, mode: .existentialConstraint)
         }
-    }
-
-    let lhsOpaque = opaqueConstraint(of: lhs)
-    let rhsOpaque = opaqueConstraint(of: rhs)
-    if lhsOpaque != nil || rhsOpaque != nil {
-        guard let lhsConstraint = lhsOpaque, let rhsConstraint = rhsOpaque else {
+        if lhsExistential != nil {
             return false
         }
-        return typeSyntaxMatches(lhsConstraint, rhsConstraint, mode: .opaqueOrCompositionConstraint)
     }
 
-    let lhsOptional = standardOptionalWrappedType(lhs)
-    let rhsOptional = standardOptionalWrappedType(rhs)
-    if lhsOptional != nil || rhsOptional != nil {
-        guard let lhsWrapped = lhsOptional, let rhsWrapped = rhsOptional else {
+    switch expected {
+    case .existential:
+        return false
+    case .opaque(let expectedConstraint):
+        guard let lhsConstraint = opaqueConstraint(of: lhs) else {
             return false
         }
-        return typeSyntaxMatches(lhsWrapped, rhsWrapped, mode: .normal)
-    }
-
-    let lhsIUO = lhs.as(ImplicitlyUnwrappedOptionalTypeSyntax.self)
-    let rhsIUO = rhs.as(ImplicitlyUnwrappedOptionalTypeSyntax.self)
-    if lhsIUO != nil || rhsIUO != nil {
-        guard let lhsIUO, let rhsIUO else {
+        return typeSyntaxMatches(lhsConstraint, expectedConstraint, mode: .opaqueOrCompositionConstraint)
+    case .optional(let expectedWrapped):
+        guard let lhsWrapped = standardOptionalWrappedType(lhs) else {
             return false
         }
-        return typeSyntaxMatches(lhsIUO.wrappedType, rhsIUO.wrappedType, mode: .normal)
-    }
-
-    let lhsMetatype = lhs.as(MetatypeTypeSyntax.self)
-    let rhsMetatype = rhs.as(MetatypeTypeSyntax.self)
-    if lhsMetatype != nil || rhsMetatype != nil {
-        guard let lhsMetatype,
-              let rhsMetatype,
-              lhsMetatype.metatypeSpecifier.text == rhsMetatype.metatypeSpecifier.text
+        return typeSyntaxMatches(lhsWrapped, expectedWrapped, mode: .normal)
+    case .iuo(let expectedWrapped):
+        guard let lhsIUO = lhs.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) else {
+            return false
+        }
+        return typeSyntaxMatches(lhsIUO.wrappedType, expectedWrapped, mode: .normal)
+    case .metatype(let expectedSpecifier, let expectedBase):
+        guard let lhsMetatype = lhs.as(MetatypeTypeSyntax.self),
+              lhsMetatype.metatypeSpecifier.text == expectedSpecifier
         else {
             return false
         }
-        return typeSyntaxMatches(lhsMetatype.baseType, rhsMetatype.baseType, mode: .exact)
-    }
-
-    let lhsComposition = lhs.as(CompositionTypeSyntax.self)
-    let rhsComposition = rhs.as(CompositionTypeSyntax.self)
-    if lhsComposition != nil || rhsComposition != nil {
-        guard let lhsComposition, let rhsComposition else {
+        return typeSyntaxMatches(lhsMetatype.baseType, expectedBase, mode: .exact)
+    case .composition(let expectedElements):
+        guard let lhsComposition = lhs.as(CompositionTypeSyntax.self) else {
             return false
         }
-        return compositionTypesMatch(lhsComposition, rhsComposition)
-    }
-
-    let lhsArray = lhs.as(ArrayTypeSyntax.self)
-    let rhsArray = rhs.as(ArrayTypeSyntax.self)
-    if lhsArray != nil || rhsArray != nil {
-        guard let lhsArray, let rhsArray else {
+        return compositionTypesMatch(lhsComposition, expectedElements)
+    case .array(let expectedElement):
+        guard let lhsArray = lhs.as(ArrayTypeSyntax.self) else {
             return false
         }
-        return typeSyntaxMatches(lhsArray.element, rhsArray.element, mode: .normal)
-    }
-
-    let lhsDictionary = lhs.as(DictionaryTypeSyntax.self)
-    let rhsDictionary = rhs.as(DictionaryTypeSyntax.self)
-    if lhsDictionary != nil || rhsDictionary != nil {
-        guard let lhsDictionary, let rhsDictionary else {
+        return typeSyntaxMatches(lhsArray.element, expectedElement, mode: .normal)
+    case .dictionary(let expectedKey, let expectedValue):
+        guard let lhsDictionary = lhs.as(DictionaryTypeSyntax.self) else {
             return false
         }
-        return typeSyntaxMatches(lhsDictionary.key, rhsDictionary.key, mode: .normal)
-            && typeSyntaxMatches(lhsDictionary.value, rhsDictionary.value, mode: .normal)
-    }
-
-    let lhsInlineArray = lhs.as(InlineArrayTypeSyntax.self)
-    let rhsInlineArray = rhs.as(InlineArrayTypeSyntax.self)
-    if lhsInlineArray != nil || rhsInlineArray != nil {
-        guard let lhsInlineArray, let rhsInlineArray else {
+        return typeSyntaxMatches(lhsDictionary.key, expectedKey, mode: .normal)
+            && typeSyntaxMatches(lhsDictionary.value, expectedValue, mode: .normal)
+    case .inlineArray(let expectedCount, let expectedElement):
+        guard let lhsInlineArray = lhs.as(InlineArrayTypeSyntax.self) else {
             return false
         }
-        return genericArgumentMatches(lhsInlineArray.count.argument, rhsInlineArray.count.argument)
-            && genericArgumentMatches(lhsInlineArray.element.argument, rhsInlineArray.element.argument)
-    }
-
-    let lhsTuple = lhs.as(TupleTypeSyntax.self)
-    let rhsTuple = rhs.as(TupleTypeSyntax.self)
-    if lhsTuple != nil || rhsTuple != nil {
-        guard let lhsTuple, let rhsTuple else {
+        return genericArgumentMatches(lhsInlineArray.count.argument, expectedCount)
+            && genericArgumentMatches(lhsInlineArray.element.argument, expectedElement)
+    case .tuple(let expectedElements):
+        guard let lhsTuple = lhs.as(TupleTypeSyntax.self) else {
             return false
         }
-        return tupleElementsMatch(lhsTuple.elements, rhsTuple.elements)
-    }
-
-    let lhsFunction = lhs.as(FunctionTypeSyntax.self)
-    let rhsFunction = rhs.as(FunctionTypeSyntax.self)
-    if lhsFunction != nil || rhsFunction != nil {
-        guard let lhsFunction, let rhsFunction else {
+        return tupleElementsMatch(lhsTuple.elements, expectedElements)
+    case .function(let expectedParameters, let expectedAsync, let expectedThrows, let expectedReturnType):
+        guard let lhsFunction = lhs.as(FunctionTypeSyntax.self) else {
             return false
         }
-        return functionTypesMatch(lhsFunction, rhsFunction)
-    }
-
-    let lhsAttributed = lhs.as(AttributedTypeSyntax.self)
-    let rhsAttributed = rhs.as(AttributedTypeSyntax.self)
-    if lhsAttributed != nil || rhsAttributed != nil {
-        guard let lhsAttributed,
-              let rhsAttributed,
-              normalizedTokenText(lhsAttributed.specifiers) == normalizedTokenText(rhsAttributed.specifiers),
-              normalizedTokenText(lhsAttributed.attributes) == normalizedTokenText(rhsAttributed.attributes),
-              normalizedTokenText(lhsAttributed.lateSpecifiers) == normalizedTokenText(rhsAttributed.lateSpecifiers)
+        return functionParametersMatch(lhsFunction.parameters, expectedParameters)
+            && effectSpecifiersMatch(
+                lhsFunction.effectSpecifiers,
+                expectedAsync: expectedAsync,
+                expectedThrows: expectedThrows
+            )
+            && typeSyntaxMatches(lhsFunction.returnClause.type, expectedReturnType, mode: .normal)
+    case .attributed(let expectedSpecifiers, let expectedAttributes, let expectedLateSpecifiers, let expectedBase):
+        guard let lhsAttributed = lhs.as(AttributedTypeSyntax.self),
+              normalizedTokenText(lhsAttributed.specifiers) == expectedSpecifiers,
+              normalizedTokenText(lhsAttributed.attributes) == expectedAttributes,
+              normalizedTokenText(lhsAttributed.lateSpecifiers) == expectedLateSpecifiers
         else {
             return false
         }
-        return typeSyntaxMatches(lhsAttributed.baseType, rhsAttributed.baseType, mode: mode)
-    }
-
-    let lhsPackExpansion = lhs.as(PackExpansionTypeSyntax.self)
-    let rhsPackExpansion = rhs.as(PackExpansionTypeSyntax.self)
-    if lhsPackExpansion != nil || rhsPackExpansion != nil {
-        guard let lhsPackExpansion, let rhsPackExpansion else {
+        return typeSyntaxMatches(lhsAttributed.baseType, expectedBase, mode: mode)
+    case .packExpansion(let expectedPattern):
+        guard let lhsPackExpansion = lhs.as(PackExpansionTypeSyntax.self) else {
             return false
         }
-        return typeSyntaxMatches(
-            lhsPackExpansion.repetitionPattern,
-            rhsPackExpansion.repetitionPattern,
-            mode: .normal
-        )
-    }
-
-    let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self)
-    let rhsSuppressed = rhs.as(SuppressedTypeSyntax.self)
-    if lhsSuppressed != nil || rhsSuppressed != nil {
-        guard let lhsSuppressed, let rhsSuppressed else {
+        return typeSyntaxMatches(lhsPackExpansion.repetitionPattern, expectedPattern, mode: .normal)
+    case .suppressed(let expectedInner):
+        guard let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self) else {
             return false
         }
-        return typeSyntaxMatches(
-            lhsSuppressed.type,
-            rhsSuppressed.type,
-            mode: .nominalConstraint
-        )
+        return typeSyntaxMatches(lhsSuppressed.type, expectedInner, mode: .nominalConstraint)
+    case .memberChain(let expectedChain):
+        guard standardOptionalWrappedType(lhs) == nil,
+              let lhsChain = memberTypeChain(for: lhs)
+        else {
+            return false
+        }
+        return memberTypeChainsMatch(lhsChain, expectedChain)
+    case .tokenText(let expectedText):
+        guard opaqueConstraint(of: lhs) == nil,
+              standardOptionalWrappedType(lhs) == nil,
+              !lhs.is(ImplicitlyUnwrappedOptionalTypeSyntax.self),
+              !lhs.is(MetatypeTypeSyntax.self),
+              !lhs.is(CompositionTypeSyntax.self),
+              !lhs.is(ArrayTypeSyntax.self),
+              !lhs.is(DictionaryTypeSyntax.self),
+              !lhs.is(InlineArrayTypeSyntax.self),
+              !lhs.is(TupleTypeSyntax.self),
+              !lhs.is(FunctionTypeSyntax.self),
+              !lhs.is(AttributedTypeSyntax.self),
+              !lhs.is(PackExpansionTypeSyntax.self),
+              !lhs.is(SuppressedTypeSyntax.self),
+              memberTypeChain(for: lhs) == nil
+        else {
+            return false
+        }
+        return normalizedTokenText(lhs) == expectedText
     }
-
-    if let lhsChain = memberTypeChain(for: lhs),
-       let rhsChain = memberTypeChain(for: rhs) {
-        return memberTypeChainsMatch(lhsChain, rhsChain)
-    }
-
-    return normalizedTokenText(lhs) == normalizedTokenText(rhs)
 }
 
 private func constraintTypeSyntaxMatches(
     _ lhs: TypeSyntax,
-    _ rhs: TypeSyntax,
+    _ expected: ExpectedTypeNode,
     mode: TypeMatchMode
 ) -> Bool {
-    if mode == .existentialConstraint,
-       let lhsMetatype = lhs.as(MetatypeTypeSyntax.self),
-       let rhsMetatype = rhs.as(MetatypeTypeSyntax.self) {
-        guard lhsMetatype.metatypeSpecifier.text == rhsMetatype.metatypeSpecifier.text else {
+    switch expected {
+    case .metatype(let expectedSpecifier, let expectedBase):
+        guard mode == .existentialConstraint,
+              let lhsMetatype = lhs.as(MetatypeTypeSyntax.self),
+              lhsMetatype.metatypeSpecifier.text == expectedSpecifier
+        else {
             return false
         }
         return typeSyntaxMatches(
             lhsMetatype.baseType,
-            rhsMetatype.baseType,
+            expectedBase,
             mode: .existentialConstraint
         )
-    }
-
-    if mode != .nominalConstraint,
-       let lhsComposition = lhs.as(CompositionTypeSyntax.self),
-       let rhsComposition = rhs.as(CompositionTypeSyntax.self) {
-        return compositionTypesMatch(lhsComposition, rhsComposition)
-    }
-
-    if mode != .nominalConstraint,
-       let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self),
-       let rhsSuppressed = rhs.as(SuppressedTypeSyntax.self) {
+    case .composition(let expectedElements):
+        guard mode != .nominalConstraint,
+              let lhsComposition = lhs.as(CompositionTypeSyntax.self)
+        else {
+            return false
+        }
+        return compositionTypesMatch(lhsComposition, expectedElements)
+    case .suppressed(let expectedInner):
+        guard mode != .nominalConstraint,
+              let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self)
+        else {
+            return false
+        }
         return typeSyntaxMatches(
             lhsSuppressed.type,
-            rhsSuppressed.type,
+            expectedInner,
             mode: .nominalConstraint
         )
-    }
-
-    guard standardOptionalWrappedType(lhs) == nil,
-          standardOptionalWrappedType(rhs) == nil,
-          let lhsChain = memberTypeChain(for: lhs),
-          let rhsChain = memberTypeChain(for: rhs),
-          isValidConstraintMemberBase(lhsChain.nonNominalBase),
-          isValidConstraintMemberBase(rhsChain.nonNominalBase)
-    else {
+    case .memberChain(let expectedChain):
+        guard standardOptionalWrappedType(lhs) == nil,
+              let lhsChain = memberTypeChain(for: lhs),
+              isValidConstraintMemberBase(lhsChain.nonNominalBase)
+        else {
+            return false
+        }
+        return memberTypeChainsMatch(lhsChain, expectedChain)
+    default:
         return false
     }
-
-    return memberTypeChainsMatch(lhsChain, rhsChain)
 }
 
 private func compositionTypesMatch(
     _ lhs: CompositionTypeSyntax,
-    _ rhs: CompositionTypeSyntax
+    _ expectedElements: [ExpectedTypeNode]
 ) -> Bool {
-    guard lhs.elements.count == rhs.elements.count else {
+    guard lhs.elements.count == expectedElements.count else {
         return false
     }
 
-    return zip(lhs.elements, rhs.elements).allSatisfy { lElement, rElement in
+    return zip(lhs.elements, expectedElements).allSatisfy { lElement, expectedElement in
         typeSyntaxMatches(
             lElement.type,
-            rElement.type,
+            expectedElement,
             mode: .opaqueOrCompositionConstraint
         )
     }
@@ -320,54 +752,61 @@ private func isValidConstraintMemberBase(_ base: TypeSyntax?) -> Bool {
 
 private func tupleElementsMatch(
     _ lhs: TupleTypeElementListSyntax,
-    _ rhs: TupleTypeElementListSyntax
+    _ expectedElements: [ExpectedTupleElement]
 ) -> Bool {
-    guard lhs.count == rhs.count else {
+    guard lhs.count == expectedElements.count else {
         return false
     }
 
-    return zip(lhs, rhs).allSatisfy { lElement, rElement in
-        lElement.firstName?.text == rElement.firstName?.text
-            && lElement.secondName?.text == rElement.secondName?.text
-            && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
-            && tupleElementTypesMatch(lElement, rElement)
+    return zip(lhs, expectedElements).allSatisfy { lElement, expectedElement in
+        lElement.firstName?.text == expectedElement.firstName
+            && lElement.secondName?.text == expectedElement.secondName
+            && (lElement.ellipsis != nil) == expectedElement.isVariadic
+            && tupleElementTypesMatch(lElement, expectedElement.type)
     }
 }
 
 private func functionParametersMatch(
     _ lhs: TupleTypeElementListSyntax,
-    _ rhs: TupleTypeElementListSyntax
+    _ expectedParameters: [ExpectedFunctionParameter]
 ) -> Bool {
-    guard lhs.count == rhs.count else {
+    guard lhs.count == expectedParameters.count else {
         return false
     }
 
-    return zip(lhs, rhs).allSatisfy { lElement, rElement in
+    return zip(lhs, expectedParameters).allSatisfy { lElement, expectedParameter in
         isValidFunctionParameterLabel(lElement)
-            && isValidFunctionParameterLabel(rElement)
-            && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
-            && tupleElementTypesMatch(lElement, rElement)
+            && (lElement.ellipsis != nil) == expectedParameter.isVariadic
+            && tupleElementTypesMatch(lElement, expectedParameter.type)
     }
 }
 
 private func tupleElementTypesMatch(
     _ lhs: TupleTypeElementSyntax,
-    _ rhs: TupleTypeElementSyntax
+    _ expected: ExpectedTypeNode
 ) -> Bool {
-    guard lhs.inoutKeyword != nil || rhs.inoutKeyword != nil else {
-        return typeSyntaxMatches(lhs.type, rhs.type, mode: .normal)
+    guard lhs.inoutKeyword != nil else {
+        return typeSyntaxMatches(lhs.type, expected, mode: .normal)
+    }
+
+    guard case .attributed(
+        let expectedSpecifiers,
+        let expectedAttributes,
+        let expectedLateSpecifiers,
+        let expectedBase
+    ) = expected else {
+        return false
     }
 
     let lhsParts = splitTupleElementType(lhs)
-    let rhsParts = splitTupleElementType(rhs)
-    guard lhsParts.specifiers == rhsParts.specifiers,
-          lhsParts.attributes == rhsParts.attributes,
-          lhsParts.lateSpecifiers == rhsParts.lateSpecifiers
+    guard lhsParts.specifiers == expectedSpecifiers,
+          lhsParts.attributes == expectedAttributes,
+          lhsParts.lateSpecifiers == expectedLateSpecifiers
     else {
         return false
     }
 
-    return typeSyntaxMatches(lhsParts.baseType, rhsParts.baseType, mode: .normal)
+    return typeSyntaxMatches(lhsParts.baseType, expectedBase, mode: .normal)
 }
 
 private func splitTupleElementType(
@@ -408,39 +847,23 @@ private func isValidFunctionParameterLabel(_ element: TupleTypeElementSyntax) ->
     return firstName.text == "_"
 }
 
-private func functionTypesMatch(
-    _ lhs: FunctionTypeSyntax,
-    _ rhs: FunctionTypeSyntax
-) -> Bool {
-    guard functionParametersMatch(lhs.parameters, rhs.parameters),
-          effectSpecifiersMatch(lhs.effectSpecifiers, rhs.effectSpecifiers)
-    else {
-        return false
-    }
-
-    return typeSyntaxMatches(
-        lhs.returnClause.type,
-        rhs.returnClause.type,
-        mode: .normal
-    )
-}
-
 private func effectSpecifiersMatch(
     _ lhs: TypeEffectSpecifiersSyntax?,
-    _ rhs: TypeEffectSpecifiersSyntax?
+    expectedAsync: String?,
+    expectedThrows: ExpectedThrowsClause?
 ) -> Bool {
-    guard lhs?.asyncSpecifier?.text == rhs?.asyncSpecifier?.text else {
+    guard lhs?.asyncSpecifier?.text == expectedAsync else {
         return false
     }
 
-    switch (lhs?.throwsClause, rhs?.throwsClause) {
+    switch (lhs?.throwsClause, expectedThrows) {
     case (nil, nil):
         return true
     case (let lhsThrows?, let rhsThrows?):
-        guard lhsThrows.throwsSpecifier.text == rhsThrows.throwsSpecifier.text else {
+        guard lhsThrows.throwsSpecifier.text == rhsThrows.throwsSpecifier else {
             return false
         }
-        switch (lhsThrows.type, rhsThrows.type) {
+        switch (lhsThrows.type, rhsThrows.errorType) {
         case (nil, nil):
             return true
         case (let lhsError?, let rhsError?):
@@ -667,7 +1090,7 @@ private func memberTypeChain(for type: TypeSyntax) -> MemberTypeChain? {
 
 private func memberTypeChainsMatch(
     _ lhs: MemberTypeChain,
-    _ rhs: MemberTypeChain
+    _ rhs: ExpectedMemberChain
 ) -> Bool {
     switch (lhs.nonNominalBase, rhs.nonNominalBase) {
     case (nil, nil):
@@ -730,36 +1153,33 @@ private func canonicalizeLeadingStandardOptional(
 
 private func nominalSegmentsMatch(
     _ lhs: MemberTypeChain,
-    _ rhs: MemberTypeChain
+    _ rhs: ExpectedMemberChain
 ) -> Bool {
     let (expandedLHS, lhsHadLeadingSelector) = expandLeadingModuleSelector(lhs.segments)
-    let (expandedRHS, rhsHadLeadingSelector) = expandLeadingModuleSelector(rhs.segments)
     let lhsHasParenthesizedTypeOwner = lhs.rootWasParenthesized && !lhsHadLeadingSelector
-    let rhsHasParenthesizedTypeOwner = rhs.rootWasParenthesized && !rhsHadLeadingSelector
+
+    if expandedLHS.count == rhs.rawExpandedCount,
+       (lhsHadLeadingSelector && rhs.hasParenthesizedTypeOwner)
+        || (rhs.hadLeadingSelector && lhsHasParenthesizedTypeOwner) {
+        return false
+    }
 
     let lhsSegments = lhsHasParenthesizedTypeOwner
         ? expandedLHS
         : canonicalizeLeadingStandardOptional(expandedLHS)
-    let rhsSegments = rhsHasParenthesizedTypeOwner
-        ? expandedRHS
-        : canonicalizeLeadingStandardOptional(expandedRHS)
+    let rhsSegments = rhs.segments
 
     guard rhsSegments.count <= lhsSegments.count else {
         return false
     }
 
     let droppedPrefixCount = lhsSegments.count - rhsSegments.count
-    if droppedPrefixCount == 0,
-       (lhsHadLeadingSelector && rhsHasParenthesizedTypeOwner)
-        || (rhsHadLeadingSelector && lhsHasParenthesizedTypeOwner) {
-        return false
-    }
     let droppedPrefix = lhsSegments.prefix(droppedPrefixCount)
     guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty && $0.moduleSelector == nil }) else {
         return false
     }
 
-    if !droppedPrefix.isEmpty, rhsHadLeadingSelector || rhsSegments[0].isStandardOptional {
+    if !droppedPrefix.isEmpty, rhs.hadLeadingSelector || rhsSegments[0].isStandardOptional {
         return false
     }
 
@@ -787,17 +1207,17 @@ private func nominalSegmentsMatch(
 
 private func nominalSegmentArgumentsMatch(
     _ lhs: NominalSegmentArguments,
-    _ rhs: NominalSegmentArguments
+    _ rhs: ExpectedSegmentArguments
 ) -> Bool {
     switch (lhs, rhs) {
     case (.none, .none):
         return true
-    case (.syntax(let lhsClause), .syntax(let rhsClause)):
-        guard lhsClause.arguments.count == rhsClause.arguments.count else {
+    case (.syntax(let lhsClause), .arguments(let rhsArguments)):
+        guard lhsClause.arguments.count == rhsArguments.count else {
             return false
         }
-        for (lhsArgument, rhsArgument) in zip(lhsClause.arguments, rhsClause.arguments) {
-            guard genericArgumentMatches(lhsArgument.argument, rhsArgument.argument) else {
+        for (lhsArgument, rhsArgument) in zip(lhsClause.arguments, rhsArguments) {
+            guard genericArgumentMatches(lhsArgument.argument, rhsArgument) else {
                 return false
             }
         }
@@ -819,13 +1239,13 @@ private func nominalSegmentArgumentsMatch(
 
 private func genericArgumentMatches(
     _ actual: GenericArgumentSyntax.Argument,
-    _ expected: GenericArgumentSyntax.Argument
+    _ expected: ExpectedGenericArgument
 ) -> Bool {
     switch (actual, expected) {
     case (.type(let actualType), .type(let expectedType)):
         typeSyntaxMatches(actualType, expectedType, mode: .normal)
     case (.expr(let actualExpr), .expr(let expectedExpr)):
-        normalizedTokenText(actualExpr) == normalizedTokenText(expectedExpr)
+        normalizedTokenText(actualExpr) == expectedExpr
     default:
         false
     }

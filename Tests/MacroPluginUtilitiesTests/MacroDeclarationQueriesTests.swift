@@ -305,7 +305,6 @@ struct MacroDeclarationQueriesTests {
             ("(any Swift.Error)!", "any Error!"),
             ("(any Swift.Error)!", "any Error! "),
             ("some Error", "any Error"),
-            ("Error", "any any Error"),
             ("Error", "any (any Error)"),
             ("Error", "any ((any Error))"),
             ("Int?", "MyModule.Optional<Int>"),
@@ -334,6 +333,7 @@ struct MacroDeclarationQueriesTests {
         ]
     )
     func typeMatchingRejectsDistinctSpellings(actual: String, expected: String) {
+        _ = parseType(expected)
         #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
@@ -345,6 +345,7 @@ struct MacroDeclarationQueriesTests {
             ("Int", ""),
             ("Int", "Int\nFloat"),
             ("Int", "[Int"),
+            ("Error", "any any Error"),
         ]
     )
     func typeMatchingRejectsMalformedSyntax(actual: String, expected: String) {
@@ -445,6 +446,10 @@ struct MacroDeclarationQueriesTests {
             ("Swift::Optional<Int>", "Optional<Int>", true),
             ("Swift::Optional<Int>", "Swift.Optional<Int>", true),
             ("Swift::Optional<Int>.Marker", "Optional<Int>.Marker", true),
+            ("Swift::Optional<Int>.Marker", "(Optional<Int>).Marker", true),
+            ("(Optional<Int>).Marker", "Swift::Optional<Int>.Marker", true),
+            ("(Swift).Optional<Int>.Marker", "Swift::Optional<Int>.Marker", false),
+            ("Swift::Optional<Int>.Marker", "(Swift).Optional<Int>.Marker", false),
             ("Swift::Optional<Int>.Marker", "Int?.Marker", true),
             ("Optional<Int>.Marker", "Swift::Optional<Int>.Marker", true),
             ("MyModule::Optional<Int>", "Optional<Int>", false),
@@ -469,6 +474,7 @@ struct MacroDeclarationQueriesTests {
         expected: String,
         shouldMatch: Bool
     ) {
+        _ = parseType(expected)
         #expect(typeMatches(parseType(actual), expectedTypeName: expected) == shouldMatch)
     }
     #endif
