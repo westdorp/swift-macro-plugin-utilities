@@ -260,11 +260,14 @@ private func tupleElementsMatch(
     }
 
     return zip(lhs, rhs).allSatisfy { lElement, rElement in
-        lElement.inoutKeyword?.text == rElement.inoutKeyword?.text
-            && lElement.firstName?.text == rElement.firstName?.text
+        lElement.firstName?.text == rElement.firstName?.text
             && lElement.secondName?.text == rElement.secondName?.text
             && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
-            && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
+            && typeSyntaxMatches(
+                effectiveTupleElementType(lElement),
+                effectiveTupleElementType(rElement),
+                allowExistentialUnwrap: true
+            )
     }
 }
 
@@ -277,12 +280,39 @@ private func functionParametersMatch(
     }
 
     return zip(lhs, rhs).allSatisfy { lElement, rElement in
-        lElement.inoutKeyword?.text == rElement.inoutKeyword?.text
-            && isValidFunctionParameterLabel(lElement)
+        isValidFunctionParameterLabel(lElement)
             && isValidFunctionParameterLabel(rElement)
             && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
-            && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
+            && typeSyntaxMatches(
+                effectiveTupleElementType(lElement),
+                effectiveTupleElementType(rElement),
+                allowExistentialUnwrap: true
+            )
     }
+}
+
+private func effectiveTupleElementType(_ element: TupleTypeElementSyntax) -> TypeSyntax {
+    guard let inoutKeyword = element.inoutKeyword else {
+        return element.type
+    }
+
+    let inoutSpecifier = TypeSpecifierListSyntax.Element.simpleTypeSpecifier(
+        SimpleTypeSpecifierSyntax(specifier: inoutKeyword.trimmed)
+    )
+    if let attributed = element.type.as(AttributedTypeSyntax.self) {
+        var specifiers = Array(attributed.specifiers)
+        specifiers.insert(inoutSpecifier, at: 0)
+        return TypeSyntax(attributed.with(\.specifiers, TypeSpecifierListSyntax(specifiers)))
+    }
+
+    return TypeSyntax(
+        AttributedTypeSyntax(
+            specifiers: TypeSpecifierListSyntax([inoutSpecifier]),
+            attributes: AttributeListSyntax([]),
+            lateSpecifiers: TypeSpecifierListSyntax([]),
+            baseType: element.type
+        )
+    )
 }
 
 private func isValidFunctionParameterLabel(_ element: TupleTypeElementSyntax) -> Bool {

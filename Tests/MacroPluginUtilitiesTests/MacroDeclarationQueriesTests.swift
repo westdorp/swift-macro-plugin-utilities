@@ -344,8 +344,8 @@ struct MacroDeclarationQueriesTests {
         #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
-    @Test("Synthetic element-level inout markers do not match unmarked function or tuple types")
-    func syntheticElementInoutMarkersDoNotMatchUnmarkedTypes() {
+    @Test("Synthetic element-level inout markers match equivalent inout function types and reject unmarked types")
+    func syntheticElementInoutMarkersMatchEquivalentInoutTypes() {
         let inoutParameter = TupleTypeElementSyntax(
             inoutKeyword: .keyword(.inout, trailingTrivia: .space),
             type: IdentifierTypeSyntax(name: .identifier("Int"))
@@ -360,6 +360,23 @@ struct MacroDeclarationQueriesTests {
             TupleTypeSyntax(elements: TupleTypeElementListSyntax([inoutParameter]))
         )
 
+        let qualifiedInoutParameter = TupleTypeElementSyntax(
+            inoutKeyword: .keyword(.inout, trailingTrivia: .space),
+            type: MemberTypeSyntax(
+                baseType: IdentifierTypeSyntax(name: .identifier("Swift")),
+                name: .identifier("Int")
+            )
+        )
+        let syntheticQualifiedFunction = TypeSyntax(
+            FunctionTypeSyntax(
+                parameters: TupleTypeElementListSyntax([qualifiedInoutParameter]),
+                returnClause: ReturnClauseSyntax(type: IdentifierTypeSyntax(name: .identifier("Void")))
+            )
+        )
+
+        #expect(typeMatches(syntheticFunction, expectedTypeName: "(inout Int) -> Void"))
+        #expect(typeMatches(syntheticFunction, expectedTypeName: "(_ value: inout Int) -> Void"))
+        #expect(typeMatches(syntheticQualifiedFunction, expectedTypeName: "(_ value: inout Int) -> Void"))
         #expect(!typeMatches(syntheticFunction, expectedTypeName: "(Int) -> Void"))
         #expect(!typeMatches(syntheticSingleTuple, expectedTypeName: "Int"))
     }
