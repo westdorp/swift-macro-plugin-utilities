@@ -111,11 +111,20 @@ struct RequireFinalMacroTests {
     @Test(
         "Open class emits conflict diagnostic without an invalid fix-it",
         arguments: [
-            "@RequireFinal\nopen class Session {}\n",
-            "@RequireFinal\nopen final class Session {}\n",
+            (
+                "@RequireFinal\nopen class Session {}\n",
+                "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', or remove @RequireFinal."
+            ),
+            (
+                "@RequireFinal\nopen final class Session {}\n",
+                "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public', change any 'open' members to 'public', or remove @RequireFinal."
+            ),
         ]
     )
-    func openClassEmitsConflictDiagnosticWithoutFixIt(source: String) throws {
+    func openClassEmitsConflictDiagnosticWithoutFixIt(
+        source: String,
+        expectedMessage: String
+    ) throws {
         let result = expand(source)
         #expect(result.diagnostics.count == 1)
 
@@ -128,10 +137,7 @@ struct RequireFinalMacroTests {
                 )
         )
         #expect(diagnostic.diagMessage.severity == .error)
-        #expect(
-            diagnostic.message
-                == "WHAT: @RequireFinal cannot be applied to an 'open' class. WHY: An 'open' class allows external subclassing, which conflicts with 'final'. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', or remove @RequireFinal."
-        )
+        #expect(diagnostic.message == expectedMessage)
         #expect(diagnostic.fixIts.isEmpty)
     }
 

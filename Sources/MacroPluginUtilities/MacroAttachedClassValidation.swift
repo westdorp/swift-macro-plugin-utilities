@@ -119,14 +119,15 @@ public struct MacroAttachedClassValidator {
         switch requirement {
         case .finalClass:
             switch finalClassFixItEligibility(for: classDeclaration) {
-            case .openClass:
+            case .openClass(let alreadyFinal):
+                let replacement = alreadyFinal ? "public" : "public final"
                 context.diagnose(
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
                     what: "\(requirements.attributeName) can only be applied to a final class.",
                     why: requirements.lifecycleOwnershipReason,
-                    how: "Replace 'open' with 'public final', change any 'open' members to 'public', or remove \(requirements.attributeName)."
+                    how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', or remove \(requirements.attributeName)."
                 )
             case .openMembers:
                 context.diagnose(
@@ -249,7 +250,7 @@ public struct MacroAttachedClassValidator {
 }
 
 private enum FinalClassFixItEligibility {
-    case openClass
+    case openClass(alreadyFinal: Bool)
     case openMembers
     case nestedClasses
     case fixable
@@ -259,7 +260,9 @@ private func finalClassFixItEligibility(
     for classDeclaration: ClassDeclSyntax
 ) -> FinalClassFixItEligibility {
     if hasModifier(named: "open", in: classDeclaration.modifiers) {
-        return .openClass
+        return .openClass(
+            alreadyFinal: hasModifier(named: "final", in: classDeclaration.modifiers)
+        )
     }
     if hasOpenMember(in: classDeclaration.memberBlock.members) {
         return .openMembers

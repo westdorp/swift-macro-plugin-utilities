@@ -13,7 +13,7 @@ public enum RequireFinalDiagnosticID: String, Sendable {
 private enum RequireFinalValidation {
     case validFinalClass
     case nonClass
-    case openClass(ClassDeclSyntax)
+    case openClass(ClassDeclSyntax, alreadyFinal: Bool)
     case classWithOpenMembers(ClassDeclSyntax)
     case classWithNestedClasses(ClassDeclSyntax)
     case fixableNonFinalClass(ClassDeclSyntax)
@@ -40,14 +40,15 @@ public struct RequireFinalMacro: PeerMacro {
                 how: "Remove @RequireFinal from this declaration or attach it to a class."
             )
             return []
-        case .openClass(let classDecl):
+        case .openClass(let classDecl, let alreadyFinal):
+            let replacement = alreadyFinal ? "public" : "public final"
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.openClass,
                 what: "@RequireFinal cannot be applied to an 'open' class.",
                 why: "An 'open' class allows external subclassing, which conflicts with 'final'.",
-                how: "Replace 'open' with 'public final', change any 'open' members to 'public', or remove @RequireFinal."
+                how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', or remove @RequireFinal."
             )
             return []
         case .classWithOpenMembers(let classDecl):
@@ -94,7 +95,10 @@ private func validate(_ declaration: some DeclSyntaxProtocol) -> RequireFinalVal
         return .nonClass
     }
     if hasModifier(named: "open", in: classDecl.modifiers) {
-        return .openClass(classDecl)
+        return .openClass(
+            classDecl,
+            alreadyFinal: hasModifier(named: "final", in: classDecl.modifiers)
+        )
     }
     if hasModifier(named: "final", in: classDecl.modifiers) {
         return .validFinalClass

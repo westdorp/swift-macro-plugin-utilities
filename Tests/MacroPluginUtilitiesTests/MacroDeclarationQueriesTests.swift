@@ -151,6 +151,16 @@ struct MacroDeclarationQueriesTests {
             ("Swift.InlineArray<4, Swift.Int>", "InlineArray<4,Int>"),
             ("Swift.InlineArray<4, Swift.Int>", "InlineArray<4, Int>"),
             ("Module.Vector<-1, Swift.Int>", "Vector<-1,Int>"),
+            ("Shapes.Optional<4>", "Optional<4>"),
+            ("Shapes.Optional<-1>", "Optional<-1>"),
+            ("Swift.Optional<Int>.Marker", "Optional<Int>.Marker"),
+            ("Namespace.Swift.Optional<Int>.Marker", "Namespace.Swift.Optional<Int>.Marker"),
+            ("[4 of Int]?", "[4 of Int]?"),
+            ("[4 of Swift.Int]", "[4 of Int]"),
+            ("[4 of Swift.Int]?", "[4 of Int]?"),
+            ("[4 of Swift.Int]!", "[4 of Int]!"),
+            ("[4 of Swift.Int].Type", "[4 of Int].Type"),
+            ("[4 of [2 of Swift.Int]]", "[4 of [2 of Int]]"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
@@ -202,6 +212,15 @@ struct MacroDeclarationQueriesTests {
             ("Namespace.Swift.Optional<Int>", "Optional<Int>"),
             ("Box<Namespace.Swift.Optional<Int>>", "Box<Swift.Optional<Int>>"),
             ("Namespace.Swift.Optional<Int>.Type", "Swift.Optional<Int>.Type"),
+            ("Namespace.Swift.Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
+            ("MyModule.Optional<Int>.Marker", "Optional<Int>.Marker"),
+            ("Shapes.Optional<4>", "Optional<8>"),
+            ("Shapes.Optional<4>", "Int?"),
+            ("[4 of Swift.Int]", "[8 of Int]"),
+            ("[4 of Outer<Int>.Item]", "[4 of Item]"),
+            ("[4 of some Swift.Error]", "[4 of Error]"),
+            ("(any Swift.Equatable & Swift.Sendable).Type", "(any (any Equatable & Sendable)).Type"),
+            ("(any Swift.Error).Type", "(any (any Error)).Type"),
             ("[Swift.String: Outer<Int>.Item]", "[String:Item]"),
             ("[some Swift.Error]", "[Error]"),
             ("(any Error)?", "any Error?"),
@@ -247,6 +266,15 @@ struct MacroDeclarationQueriesTests {
     func existentialAndOpaqueTypesRemainAsymmetric() {
         #expect(typeMatches(parseType("any Error"), expectedTypeName: "Error"))
         #expect(!typeMatches(parseType("some Error"), expectedTypeName: "Error"))
+    }
+
+    @Test("Deeply nested Optional leaf mismatches stay linear")
+    func deeplyNestedOptionalLeafMismatchStaysLinear() {
+        let depth = 24
+        let actual = String(repeating: "Optional<", count: depth) + "Int" + String(repeating: ">", count: depth)
+        let expected = String(repeating: "Optional<", count: depth) + "String" + String(repeating: ">", count: depth)
+
+        #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
     @Test(

@@ -25,10 +25,10 @@
   `Namespace.Swift.Optional<Int>`) no longer match unqualified `Optional<Int>`,
   `Swift.Optional<Int>`, or `Int?`.
 - Qualified protocol compositions (`any Swift.Equatable & Swift.Sendable`),
-  array and dictionary element types (`[Swift.Int]`, `[Swift.String: Swift.Int?]`),
-  parenthesized metatype bases (`(Swift.Int).Type`, `(any Swift.Error).Type`),
-  and Swift 6.2 value generic arguments (`Swift.InlineArray<4, Swift.Int>`) now
-  match structurally.
+  array, dictionary, and inline-array element types (`[Swift.Int]`,
+  `[Swift.String: Swift.Int?]`, `[4 of Swift.Int]`), parenthesized metatype
+  bases (`(Swift.Int).Type`, `(any Swift.Error).Type`), and Swift 6.2 value
+  generic arguments (`Swift.InlineArray<4, Swift.Int>`) now match structurally.
 
 ### Attached-class final validation
 
