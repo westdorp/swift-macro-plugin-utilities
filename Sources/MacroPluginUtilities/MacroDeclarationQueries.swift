@@ -48,12 +48,7 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
         )
     }
 
-    if let identifierType = type.as(IdentifierTypeSyntax.self),
-       identifierType.name.text == "Optional",
-       let arguments = identifierType.genericArgumentClause?.arguments,
-       arguments.count == 1,
-       let argument = arguments.first,
-       case .type(let wrappedType) = argument.argument {
+    if let wrappedType = optionalWrappedType(type) {
         guard expected.hasSuffix("?") else {
             return false
         }
@@ -86,17 +81,25 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
     }
 
     if let metatype = type.as(MetatypeTypeSyntax.self) {
-        let suffix = ".\(metatype.metatypeSpecifier.text)"
-        guard expected.hasSuffix(suffix) else {
-            return false
-        }
-        return qualifiedNominalMatches(
-            metatype.baseType,
-            expected: String(expected.dropLast(suffix.count))
-        )
+        return qualifiedMetatypeMatches(metatype, expected: expected)
     }
 
     return qualifiedNominalMatches(type, expected: expected)
+}
+
+private func qualifiedMetatypeMatches(
+    _ metatype: MetatypeTypeSyntax,
+    expected: String
+) -> Bool {
+    let suffix = ".\(metatype.metatypeSpecifier.text)"
+    guard expected.hasSuffix(suffix) else {
+        return false
+    }
+    let remainingExpected = String(expected.dropLast(suffix.count))
+    if let nestedMetatype = metatype.baseType.as(MetatypeTypeSyntax.self) {
+        return qualifiedMetatypeMatches(nestedMetatype, expected: remainingExpected)
+    }
+    return qualifiedNominalMatches(metatype.baseType, expected: remainingExpected)
 }
 
 private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bool {
@@ -128,6 +131,31 @@ private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bo
     return false
 }
 
+private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
+    if let identifierType = type.as(IdentifierTypeSyntax.self),
+       identifierType.name.text == "Optional",
+       let arguments = identifierType.genericArgumentClause?.arguments,
+       arguments.count == 1,
+       let argument = arguments.first,
+       case .type(let wrappedType) = argument.argument {
+        return wrappedType
+    }
+
+    if let memberType = type.as(MemberTypeSyntax.self),
+       memberType.name.text == "Optional",
+       let baseIdentifier = memberType.baseType.as(IdentifierTypeSyntax.self),
+       baseIdentifier.name.text == "Swift",
+       baseIdentifier.genericArgumentClause == nil,
+       let arguments = memberType.genericArgumentClause?.arguments,
+       arguments.count == 1,
+       let argument = arguments.first,
+       case .type(let wrappedType) = argument.argument {
+        return wrappedType
+    }
+
+    return nil
+}
+
 private func isNominalChain(_ type: TypeSyntax) -> Bool {
     if type.is(IdentifierTypeSyntax.self) {
         return true
@@ -155,12 +183,7 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
         return normalizedPostfixBaseText(optionalType.wrappedType) + "?"
     }
 
-    if let identifierType = type.as(IdentifierTypeSyntax.self),
-       identifierType.name.text == "Optional",
-       let arguments = identifierType.genericArgumentClause?.arguments,
-       arguments.count == 1,
-       let argument = arguments.first,
-       case .type(let wrappedType) = argument.argument {
+    if let wrappedType = optionalWrappedType(type) {
         return normalizedPostfixBaseText(wrappedType) + "?"
     }
 

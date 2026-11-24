@@ -71,6 +71,10 @@ struct RequireFinalMacroTests {
                 "enum Other { class Session {} }\n@RequireFinal\nclass Session {\n    class Child: Other.Session {}\n}\n",
                 "enum Other { class Session {} }\n@RequireFinal\nfinal class Session {\n    class Child: Other.Session {}\n}\n"
             ),
+            (
+                "@RequireFinal\nclass Session {\n    enum Scope {\n        class Session {}\n        class Child: Session {}\n    }\n}\n",
+                "@RequireFinal\nfinal class Session {\n    enum Scope {\n        class Session {}\n        class Child: Session {}\n    }\n}\n"
+            ),
         ]
     )
     func nonFinalClassEmitsStructuredDiagnosticAndFixIt(
@@ -204,6 +208,18 @@ struct RequireFinalMacroTests {
                 class Session {
                     class Child: Outer.Session {}
                 }
+            }
+            """,
+            """
+            @RequireFinal
+            class Session {
+                class Child: ExampleModule.Session {}
+            }
+            """,
+            """
+            @RequireFinal
+            class Session {
+                class Child: (Session) {}
             }
             """,
         ]

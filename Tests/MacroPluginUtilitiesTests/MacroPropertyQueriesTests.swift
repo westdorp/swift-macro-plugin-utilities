@@ -155,7 +155,9 @@ struct MacroPropertyQueriesTests {
         "Initializer matching preserves qualified metatypes and opaque wrapper boundaries",
         arguments: [
             ("init(value: Swift.Int.Type) {}", "Int.Type", true),
+            ("init(value: Swift.Int.Type.Type) {}", "Int.Type.Type", true),
             ("init(value: Int.Type) {}", "Int.Type", true),
+            ("init(value: Swift.Optional<Int>) {}", "Int?", true),
             ("init(value: Optional<Int>.Type) {}", "Optional<Int>.Type", true),
             ("init(value: Swift.Optional<Int>.Type) {}", "Optional<Int>.Type", true),
             ("init(value: any P.Type) {}", "P.Type", true),
