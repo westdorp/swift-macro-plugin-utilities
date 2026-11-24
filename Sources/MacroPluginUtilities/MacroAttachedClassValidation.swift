@@ -126,7 +126,7 @@ public struct MacroAttachedClassValidator {
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
-                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    what: "\(requirements.attributeName) cannot be applied to an 'open' class.",
                     why: requirements.lifecycleOwnershipReason,
                     how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
                 )

@@ -8,6 +8,11 @@
   `hasConflictingInitializer`) now parses expected type names with `SwiftParser`
   and rejects actual or expected types containing syntax errors (for example,
   recovered incomplete spellings such as `[Int` no longer match `[Int`).
+  Unparseable `expectedTypeName` or `parameterType` strings (including legacy
+  whitespace-stripped forms such as `()asyncthrows->Void`) return `false` from
+  `typeMatches`, `hasStoredLetProperty`, and `hasConflictingInitializer`; pass
+  valid Swift type syntax when configuring
+  `MacroAttachedClassRequirements.storedPropertyTypeName`.
 - `typeMatches` now preserves a separating space between adjacent word tokens
   instead of stripping all whitespace. Expected strings for multi-word spellings
   must include that space (for example `()async throws->Void`, `inout Foo`,
@@ -37,17 +42,17 @@
   `any Error.Type` and rejecting malformed or nested `any` constraints (such as
   `any Error?`, `any (any Error)`, `any ~(any Copyable)`, `any ()`, and
   `(any ((any P) & Q)).Type`).
-- Function types (comparing parameters while ignoring documentation-only
-  parameter labels, `async`/`throws`/typed-`throws` effects, and return types),
-  attributed types (`@Sendable`, `inout`, `borrowing`), pack expansion types
-  (preserving single-element pack tuples such as `Box<(repeat each T)>` distinct
-  from `Box<repeat each T>`), qualified protocol compositions
-  (`any Swift.Equatable & Swift.Sendable`), tuples (`(Swift.Int, Swift.String)`),
-  array, dictionary, and inline-array element types and member chains
-  (`[Swift.Int]`, `[Swift.Int].Index`, `[Swift.String: Swift.Int?]`,
-  `[4 of Swift.Int]`), parenthesized metatype bases (`(Swift.Int).Type`,
-  `(any Swift.Error).Type`), and Swift 6.2 value generic arguments
-  (`Swift.InlineArray<4, Swift.Int>`) now match structurally.
+- Function types (comparing parameter types, `async`/`throws`/typed-`throws`
+  effect specifiers, and return types while ignoring documentation-only
+  `_ name:` parameter labels), attributed types (`@Sendable`, `inout`,
+  `borrowing`), pack expansion types (preserving single-element pack tuples
+  such as `Box<(repeat each T)>` distinct from `Box<repeat each T>`), qualified
+  protocol compositions (`any Swift.Equatable & Swift.Sendable`), tuples
+  (`(Swift.Int, Swift.String)`), array, dictionary, and inline-array element
+  types and member chains (`[Swift.Int]`, `[Swift.Int].Index`,
+  `[Swift.String: Swift.Int?]`, `[4 of Swift.Int]`), parenthesized metatype
+  bases (`(Swift.Int).Type`, `(any Swift.Error).Type`), and Swift 6.2 value
+  generic arguments (`Swift.InlineArray<4, Swift.Int>`) now match structurally.
 
 ### Fix-it helpers
 

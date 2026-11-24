@@ -38,7 +38,16 @@ struct ExpectedTypePattern {
     private let root: ExpectedTypeNode
 
     init?(parsing text: String) {
-        guard let parsed = parseExpectedType(text),
+        guard let trimmed = trimmedNonEmpty(text) else {
+            return nil
+        }
+
+        if trimmed == "class" {
+            self.root = .classRestriction
+            return
+        }
+
+        guard let parsed = parseExpectedType(trimmed),
               let compiled = compileExpectedType(parsed, mode: .normal)
         else {
             return nil
@@ -56,14 +65,17 @@ struct ExpectedTypePattern {
     }
 }
 
-private func parseExpectedType(_ text: String) -> TypeSyntax? {
+private func trimmedNonEmpty(_ text: String) -> String? {
     guard let firstNonWhitespace = text.firstIndex(where: { !$0.isWhitespace }),
           let lastNonWhitespace = text.lastIndex(where: { !$0.isWhitespace })
     else {
         return nil
     }
 
-    let trimmed = String(text[firstNonWhitespace...lastNonWhitespace])
+    return String(text[firstNonWhitespace...lastNonWhitespace])
+}
+
+private func parseExpectedType(_ trimmed: String) -> TypeSyntax? {
     var parser = Parser(trimmed)
     let parsed = TypeSyntax.parse(from: &parser)
     guard !parsed.hasError, parsed.totalLength.utf8Length == trimmed.utf8.count else {
@@ -106,6 +118,7 @@ private indirect enum ExpectedTypeNode {
     )
     case packExpansion(ExpectedTypeNode)
     case suppressed(ExpectedTypeNode)
+    case classRestriction
     case memberChain(ExpectedMemberChain)
     case tokens([TokenKind])
 }
@@ -136,13 +149,6 @@ private enum ExpectedSegmentArguments {
     case none
     case arguments([ExpectedGenericArgument])
     case syntheticOptional(ExpectedTypeNode)
-
-    var isEmpty: Bool {
-        if case .none = self {
-            return true
-        }
-        return false
-    }
 
     var singleTypeArgument: ExpectedTypeNode? {
         switch self {
@@ -175,10 +181,6 @@ private struct ExpectedNominalSegment {
 
     var isStandardOptional: Bool {
         isUnqualifiedStandardOptional || isSwiftQualifiedStandardOptional
-    }
-
-    var isPlainSwiftNamespace: Bool {
-        moduleSelector == nil && name == "Swift" && arguments.isEmpty
     }
 }
 
@@ -656,6 +658,8 @@ private func typeSyntaxMatches(
             return false
         }
         return typeSyntaxMatches(lhsSuppressed.type, expectedInner, mode: .nominalConstraint)
+    case .classRestriction:
+        return lhs.is(ClassRestrictionTypeSyntax.self)
     case .memberChain(let expectedChain):
         guard standardOptionalWrappedType(lhs) == nil,
               let lhsChain = memberTypeChain(for: lhs)
@@ -677,6 +681,7 @@ private func typeSyntaxMatches(
               !lhs.is(AttributedTypeSyntax.self),
               !lhs.is(PackExpansionTypeSyntax.self),
               !lhs.is(SuppressedTypeSyntax.self),
+              !lhs.is(ClassRestrictionTypeSyntax.self),
               memberTypeChain(for: lhs) == nil
         else {
             return false

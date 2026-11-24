@@ -571,6 +571,21 @@ struct MacroDeclarationQueriesTests {
         )
         #expect(parameters.map(enumCaseLabel) == [nil, "seconds", nil])
     }
+
+    @Test("Matches legacy class restriction inherited types only against exact class")
+    func matchesLegacyClassRestrictionInheritedType() throws {
+        let protocolDecl = try #require(
+            parseDeclaration("protocol Legacy: class {}")?.as(ProtocolDeclSyntax.self)
+        )
+        let inheritedType = try #require(
+            protocolDecl.inheritanceClause?.inheritedTypes.first?.type
+        )
+        #expect(inheritedType.is(ClassRestrictionTypeSyntax.self))
+        #expect(typeMatches(inheritedType, expectedTypeName: "class"))
+        #expect(typeMatches(inheritedType, expectedTypeName: "  class\n"))
+        #expect(!typeMatches(inheritedType, expectedTypeName: "AnyObject"))
+        #expect(!typeMatches(parseType("AnyObject"), expectedTypeName: "class"))
+    }
 }
 
 private func parseModifiers(_ source: String) -> DeclModifierListSyntax? {
