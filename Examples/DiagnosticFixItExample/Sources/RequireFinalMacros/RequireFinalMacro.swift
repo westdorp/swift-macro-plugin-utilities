@@ -14,7 +14,7 @@ private enum RequireFinalValidation {
     case validFinalClass
     case nonClass
     case openClass(ClassDeclSyntax, alreadyFinal: Bool)
-    case classWithOpenMembers(ClassDeclSyntax, hasNestedClasses: Bool)
+    case classWithOpenMembers(ClassDeclSyntax, alreadyFinal: Bool, hasNestedClasses: Bool)
     case classWithNestedClasses(ClassDeclSyntax)
     case fixableNonFinalClass(ClassDeclSyntax)
 }
@@ -52,15 +52,22 @@ public struct RequireFinalMacro: PeerMacro {
                 how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
             )
             return []
-        case .classWithOpenMembers(let classDecl, let hasNestedClasses):
-            let how = hasNestedClasses
-                ? "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
-                : "Change any 'open' members to 'public' before adding 'final'."
+        case .classWithOpenMembers(let classDecl, let alreadyFinal, let hasNestedClasses):
+            let what = alreadyFinal
+                ? "@RequireFinal cannot accept a 'final' class that contains 'open' member declarations."
+                : "@RequireFinal requires a final class, but this class contains 'open' member declarations."
+            let how = if alreadyFinal {
+                "Change any 'open' members to 'public' so they are valid on a 'final' class."
+            } else if hasNestedClasses {
+                "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+            } else {
+                "Change any 'open' members to 'public' before adding 'final'."
+            }
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.openMembers,
-                what: "@RequireFinal requires a final class, but this class contains 'open' member declarations.",
+                what: what,
                 why: "Swift forbids 'open' members on a 'final' class.",
                 how: how
             )
@@ -98,18 +105,16 @@ private func validate(_ declaration: some DeclSyntaxProtocol) -> RequireFinalVal
     guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
         return .nonClass
     }
+    let isFinal = hasModifier(named: "final", in: classDecl.modifiers)
     if hasModifier(named: "open", in: classDecl.modifiers) {
-        return .openClass(
-            classDecl,
-            alreadyFinal: hasModifier(named: "final", in: classDecl.modifiers)
-        )
-    }
-    if hasModifier(named: "final", in: classDecl.modifiers) {
-        return .validFinalClass
+        return .openClass(classDecl, alreadyFinal: isFinal)
     }
     let hasNested = hasNestedClass(in: classDecl.memberBlock)
     if hasOpenMember(in: classDecl.memberBlock.members) {
-        return .classWithOpenMembers(classDecl, hasNestedClasses: hasNested)
+        return .classWithOpenMembers(classDecl, alreadyFinal: isFinal, hasNestedClasses: hasNested)
+    }
+    if isFinal {
+        return .validFinalClass
     }
     if hasNested {
         return .classWithNestedClasses(classDecl)

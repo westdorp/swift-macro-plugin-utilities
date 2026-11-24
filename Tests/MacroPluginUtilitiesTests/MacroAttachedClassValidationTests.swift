@@ -84,6 +84,13 @@ struct MacroAttachedClassValidationTests {
                 fixItMessages: []
             ),
             MissingRequirement(
+                source: "@MainActor final class Monitor { let player: AVPlayer; open func reload() {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' so they are valid on a 'final' class.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
                 source: "@MainActor class Monitor { let player: AVPlayer; class Child: Monitor {} }",
                 requirement: .finalClass,
                 id: "class-only",

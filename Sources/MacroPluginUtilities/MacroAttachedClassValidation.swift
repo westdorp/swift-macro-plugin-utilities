@@ -111,14 +111,12 @@ public struct MacroAttachedClassValidator {
         _ requirement: MacroAttachedClassRequirement,
         in context: some MacroExpansionContext
     ) -> Bool {
-        guard !satisfies(requirement) else {
-            return true
-        }
-
         let className = Syntax(classDeclaration.name)
         switch requirement {
         case .finalClass:
-            switch finalClassFixItEligibility(for: classDeclaration) {
+            switch finalClassValidationState(for: classDeclaration) {
+            case .validFinalClass:
+                return true
             case .openClass(let alreadyFinal):
                 let replacement = alreadyFinal ? "public" : "public final"
                 let removal = alreadyFinal
@@ -132,16 +130,26 @@ public struct MacroAttachedClassValidator {
                     why: requirements.lifecycleOwnershipReason,
                     how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
                 )
-            case .openMembers(let hasNestedClasses):
-                let how = hasNestedClasses
-                    ? "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
-                    : "Change any 'open' members to 'public' before adding 'final'."
+            case .openMembers(let alreadyFinal, let hasNestedClasses):
+                let what = alreadyFinal
+                    ? "\(requirements.attributeName) cannot accept a 'final' class that contains 'open' member declarations."
+                    : "\(requirements.attributeName) can only be applied to a final class."
+                let why = alreadyFinal
+                    ? "Swift forbids 'open' members on a 'final' class."
+                    : requirements.lifecycleOwnershipReason
+                let how = if alreadyFinal {
+                    "Change any 'open' members to 'public' so they are valid on a 'final' class."
+                } else if hasNestedClasses {
+                    "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+                } else {
+                    "Change any 'open' members to 'public' before adding 'final'."
+                }
                 context.diagnose(
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
-                    what: "\(requirements.attributeName) can only be applied to a final class.",
-                    why: requirements.lifecycleOwnershipReason,
+                    what: what,
+                    why: why,
                     how: how
                 )
             case .nestedClasses:
@@ -173,7 +181,11 @@ public struct MacroAttachedClassValidator {
                     fixIts: fixIts
                 )
             }
+            return false
         case .mainActorIsolation:
+            guard !satisfies(.mainActorIsolation) else {
+                return true
+            }
             let fixIts = [
                 makeAddMainActorFixIt(
                     for: classDeclaration,
@@ -192,7 +204,11 @@ public struct MacroAttachedClassValidator {
                 how: "Annotate the type with '@MainActor'.",
                 fixIts: fixIts
             )
+            return false
         case .storedLetProperty:
+            guard !satisfies(.storedLetProperty) else {
+                return true
+            }
             context.diagnose(
                 className,
                 domain: requirements.diagnosticDomain,
@@ -201,7 +217,11 @@ public struct MacroAttachedClassValidator {
                 why: requirements.storedPropertyReason,
                 how: "Add 'let \(requirements.storedPropertyName): \(requirements.storedPropertyTypeName)'."
             )
+            return false
         case .initializerAvailability:
+            guard !satisfies(.initializerAvailability) else {
+                return true
+            }
             let initializer = "init(\(requirements.storedPropertyName):)"
             context.diagnose(
                 className,
@@ -211,9 +231,8 @@ public struct MacroAttachedClassValidator {
                 why: requirements.initializerReason,
                 how: "Remove the custom '\(initializer)' or remove \(requirements.attributeName) and manage wiring manually."
             )
+            return false
         }
-
-        return false
     }
 
     /// Diagnoses every unsatisfied requested contract.
@@ -230,8 +249,7 @@ public struct MacroAttachedClassValidator {
     public func satisfies(_ requirement: MacroAttachedClassRequirement) -> Bool {
         switch requirement {
         case .finalClass:
-            hasModifier(named: "final", in: classDeclaration.modifiers)
-                && !hasModifier(named: "open", in: classDeclaration.modifiers)
+            finalClassValidationState(for: classDeclaration).isValidFinalClass
         case .mainActorIsolation:
             hasAttribute(named: "MainActor", in: classDeclaration.attributes)
         case .storedLetProperty:
@@ -255,24 +273,34 @@ public struct MacroAttachedClassValidator {
     }
 }
 
-private enum FinalClassFixItEligibility {
+private enum FinalClassValidationState {
+    case validFinalClass
     case openClass(alreadyFinal: Bool)
-    case openMembers(hasNestedClasses: Bool)
+    case openMembers(alreadyFinal: Bool, hasNestedClasses: Bool)
     case nestedClasses
     case fixable
+
+    var isValidFinalClass: Bool {
+        if case .validFinalClass = self {
+            return true
+        }
+        return false
+    }
 }
 
-private func finalClassFixItEligibility(
+private func finalClassValidationState(
     for classDeclaration: ClassDeclSyntax
-) -> FinalClassFixItEligibility {
+) -> FinalClassValidationState {
+    let isFinal = hasModifier(named: "final", in: classDeclaration.modifiers)
     if hasModifier(named: "open", in: classDeclaration.modifiers) {
-        return .openClass(
-            alreadyFinal: hasModifier(named: "final", in: classDeclaration.modifiers)
-        )
+        return .openClass(alreadyFinal: isFinal)
     }
     let hasNested = hasNestedClass(in: classDeclaration.memberBlock)
     if hasOpenMember(in: classDeclaration.memberBlock.members) {
-        return .openMembers(hasNestedClasses: hasNested)
+        return .openMembers(alreadyFinal: isFinal, hasNestedClasses: hasNested)
+    }
+    if isFinal {
+        return .validFinalClass
     }
     if hasNested {
         return .nestedClasses

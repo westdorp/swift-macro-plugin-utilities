@@ -188,6 +188,10 @@ struct MacroDeclarationQueriesTests {
             ("borrowing some Collection<Swift.Int>", "borrowing some Collection<Int>"),
             ("(some Collection<Swift.Int>)?", "Optional<some Collection<Int>>"),
             ("some Swift.Equatable & Swift.Sendable", "some Equatable & Sendable"),
+            ("some (Int?).Marker", "some (Int?).Marker"),
+            ("some (Int?).Marker", "some Optional<Int>.Marker"),
+            ("some Optional<Int>.Marker", "some (Int?).Marker"),
+            ("any (Int?).Marker", "Optional<Int>.Marker"),
             ("@Sendable nonisolated(nonsending) () -> Swift.Int", "@Sendable nonisolated(nonsending) () -> Int"),
         ]
     )
@@ -330,6 +334,26 @@ struct MacroDeclarationQueriesTests {
         #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
+    @Test("Synthetic element-level inout markers do not match unmarked function or tuple types")
+    func syntheticElementInoutMarkersDoNotMatchUnmarkedTypes() {
+        let inoutParameter = TupleTypeElementSyntax(
+            inoutKeyword: .keyword(.inout, trailingTrivia: .space),
+            type: IdentifierTypeSyntax(name: .identifier("Int"))
+        )
+        let syntheticFunction = TypeSyntax(
+            FunctionTypeSyntax(
+                parameters: TupleTypeElementListSyntax([inoutParameter]),
+                returnClause: ReturnClauseSyntax(type: IdentifierTypeSyntax(name: .identifier("Void")))
+            )
+        )
+        let syntheticSingleTuple = TypeSyntax(
+            TupleTypeSyntax(elements: TupleTypeElementListSyntax([inoutParameter]))
+        )
+
+        #expect(!typeMatches(syntheticFunction, expectedTypeName: "(Int) -> Void"))
+        #expect(!typeMatches(syntheticSingleTuple, expectedTypeName: "Int"))
+    }
+
     #if canImport(SwiftSyntax603)
     @Test(
         "Module selectors match qualification and preserve custom Optional isolation",
@@ -357,6 +381,8 @@ struct MacroDeclarationQueriesTests {
             ("[Int].Swift::Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
             ("Container.Swift::Optional<Int>.Marker", "Container.Optional<Int>.Marker", false),
             ("[Int].Swift.Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
+            ("Container.Foreign::Owner.Result<Int>", "Result<Int>", false),
+            ("Container.Foreign::Owner.Result<Int>", "Container.Foreign::Owner.Result<Int>", true),
         ]
     )
     func moduleSelectorsPreserveQualificationAndOptionalIsolation(

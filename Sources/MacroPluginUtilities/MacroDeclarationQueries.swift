@@ -257,7 +257,8 @@ private func tupleElementsMatch(
     }
 
     return zip(lhs, rhs).allSatisfy { lElement, rElement in
-        lElement.firstName?.text == rElement.firstName?.text
+        lElement.inoutKeyword?.text == rElement.inoutKeyword?.text
+            && lElement.firstName?.text == rElement.firstName?.text
             && lElement.secondName?.text == rElement.secondName?.text
             && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
             && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
@@ -273,7 +274,8 @@ private func functionParametersMatch(
     }
 
     return zip(lhs, rhs).allSatisfy { lElement, rElement in
-        isValidFunctionParameterLabel(lElement)
+        lElement.inoutKeyword?.text == rElement.inoutKeyword?.text
+            && isValidFunctionParameterLabel(lElement)
             && isValidFunctionParameterLabel(rElement)
             && (lElement.ellipsis != nil) == (rElement.ellipsis != nil)
             && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
@@ -337,7 +339,9 @@ private func unwrapGrouping(_ type: TypeSyntax) -> TypeSyntax {
     if let tupleType = type.as(TupleTypeSyntax.self),
        tupleType.elements.count == 1,
        let element = tupleType.elements.first,
+       element.inoutKeyword == nil,
        element.firstName == nil,
+       element.secondName == nil,
        element.ellipsis == nil,
        !element.type.is(PackExpansionTypeSyntax.self) {
         return unwrapGrouping(element.type)
@@ -409,11 +413,14 @@ private func isNominalExistentialConstraint(_ type: TypeSyntax) -> Bool {
         return false
     }
 
+    var walkedMember = false
     while let member = current.as(MemberTypeSyntax.self) {
+        walkedMember = true
         current = unwrapGrouping(member.baseType)
     }
 
     return current.is(IdentifierTypeSyntax.self)
+        || (walkedMember && current.is(OptionalTypeSyntax.self))
 }
 
 private func standardOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
@@ -655,7 +662,7 @@ private func nominalSegmentsMatch(
 
     let droppedPrefixCount = lhsSegments.count - rhsSegments.count
     let droppedPrefix = lhsSegments.prefix(droppedPrefixCount)
-    guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty }) else {
+    guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty && $0.moduleSelector == nil }) else {
         return false
     }
 
