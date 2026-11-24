@@ -20,60 +20,53 @@ swift-network-extension-macros        (@ProviderConfiguration, @TunnelStateMachi
 
 ## Quick start
 
-Requires Swift 6.2 or later on macOS 13 or later. Add the package dependency to `Package.swift`:
+Requires Swift 6.2 or later on macOS 13 or later. Add both `swift-macro-plugin-utilities` and `swift-syntax` to `Package.swift`, and wire your macro and library targets (see [`Examples/DiagnosticFixItExample/Package.swift`](Examples/DiagnosticFixItExample/Package.swift)):
 
 ```swift
-.package(url: "https://github.com/westdorp/swift-macro-plugin-utilities.git", .upToNextMinor(from: "0.7.0"))
-```
-
-Add `MacroPluginUtilities` to your `.macro` target dependencies:
-
-```swift
-.product(name: "MacroPluginUtilities", package: "swift-macro-plugin-utilities")
+dependencies: [
+    .package(url: "https://github.com/westdorp/swift-macro-plugin-utilities.git", .upToNextMinor(from: "0.7.0")),
+    .package(url: "https://github.com/swiftlang/swift-syntax.git", "602.0.0"..<"604.0.0"),
+],
+targets: [
+    .macro(
+        name: "RequireFinalMacros",
+        dependencies: [
+            .product(name: "MacroPluginUtilities", package: "swift-macro-plugin-utilities"),
+            .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            .product(name: "SwiftSyntax", package: "swift-syntax"),
+            .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+        ]
+    ),
+    .target(name: "RequireFinal", dependencies: ["RequireFinalMacros"]),
+]
 ```
 
 If another dependency already exposes `MacroPluginUtilities`, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` and write `import PluginUtilities` in your macro target.
 
-Define an attached peer macro, register it in your `CompilerPlugin`, and declare `@RequireFinal` in your library target:
+In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) validates non-class declarations, `open` classes, and `open` members, then emits one structured diagnostic with a deterministic fix-it:
 
 ```swift
-// RequireFinalMacros target
-import MacroPluginUtilities
-import SwiftCompilerPlugin
-import SwiftSyntax
-import SwiftSyntaxMacros
-
-public struct RequireFinalMacro: PeerMacro {
-    public static func expansion(
-        of node: AttributeSyntax,
-        providingPeersOf declaration: some DeclSyntaxProtocol,
-        in context: some MacroExpansionContext
-    ) -> [DeclSyntax] {
-        guard let classDecl = declaration.as(ClassDeclSyntax.self),
-              !hasModifier(named: "open", in: classDecl.modifiers),
-              !hasModifier(named: "final", in: classDecl.modifiers) else { return [] }
-        let fixIt = makeAddFinalFixIt(
-            for: classDecl,
-            fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: "RequireFinalMacro")
-        )
-        context.diagnose(
-            classDecl.name, domain: "RequireFinalMacro", id: "missing-final",
-            what: "@RequireFinal requires a final class.",
-            why: "Subclasses would bypass the type's invariants.",
-            how: "Add the 'final' modifier to this class declaration.",
-            fixIts: [fixIt]
-        )
-        return []
-    }
+guard !hasModifier(named: "final", in: classDecl.modifiers) else {
+    return []
 }
 
-@main struct RequireFinalPlugin: CompilerPlugin {
-    let providingMacros: [Macro.Type] = [RequireFinalMacro.self]
-}
-
-// RequireFinal library target
-@attached(peer) public macro RequireFinal() = #externalMacro(module: "RequireFinalMacros", type: "RequireFinalMacro")
+let fixIt = makeAddFinalFixIt(
+    for: classDecl,
+    fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: diagnosticDomain)
+)
+context.diagnose(
+    classDecl.name,
+    domain: diagnosticDomain,
+    id: RequireFinalDiagnosticID.missingFinal,
+    what: "@RequireFinal requires a final class.",
+    why: "Subclasses would bypass the type's invariants.",
+    how: "Add the 'final' modifier to this class declaration.",
+    fixIts: [fixIt]
+)
+return []
 ```
+
+[`RequireFinalPlugin.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalPlugin.swift) registers `RequireFinalMacro` in a `CompilerPlugin`, and [`RequireFinal.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinal/RequireFinal.swift) exposes `@attached(peer) public macro RequireFinal()`.
 
 Attaching `@RequireFinal` to `class Session {}` produces:
 
@@ -82,7 +75,7 @@ error: WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass 
 fix-it: Add 'final' modifier -> final class Session {}
 ```
 
-To see this live, run `swift test --package-path Examples/DiagnosticFixItExample`, or remove `final` from `Session` in [`Examples/DiagnosticFixItExample/Sources/DiagnosticFixItExample/main.swift`](Examples/DiagnosticFixItExample/Sources/DiagnosticFixItExample/main.swift) and run `swift build --package-path Examples/DiagnosticFixItExample`.
+Run `swift test --package-path Examples/DiagnosticFixItExample` to verify every case, or remove `final` from `Session` in [`Examples/DiagnosticFixItExample/Sources/DiagnosticFixItExample/main.swift`](Examples/DiagnosticFixItExample/Sources/DiagnosticFixItExample/main.swift) and run `swift build --package-path Examples/DiagnosticFixItExample` to see the compiler emit the diagnostic directly.
 
 ## Diagnostic contract
 
@@ -148,7 +141,7 @@ Run the package tests:
 swift test
 ```
 
-Run the full test suite, the example package, and repository checks:
+Run the full test suite, the example package, and repository checks (requires Python 3.11 or later and Ruby with Psych):
 
 ```sh
 make test
@@ -168,4 +161,4 @@ The package requires macOS 13 or later on the compiler host, supporting throwing
 
 Patch releases preserve source compatibility within each minor line. Before `1.0`, a new minor release may include breaking API changes and provides migration notes in [MIGRATION.md](MIGRATION.md).
 
-Before `1.0`, use `.upToNextMinor(from:)` when multiple packages in the same dependency graph depend on this library so they resolve the same minor release.
+Before `1.0`, use `.upToNextMinor(from:)` pinned to the same minor release across packages in the same dependency graph, and move them together on each new minor so they do not conflict.

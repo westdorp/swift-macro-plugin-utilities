@@ -27,15 +27,16 @@ public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String)
 /// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
     let normalized = normalizedTypeText(type)
-    if containsOpaqueType(type) {
-        return normalized == expectedTypeName
+    if normalized == expectedTypeName {
+        return true
     }
-    return normalized == expectedTypeName || normalized.hasSuffix(".\(expectedTypeName)")
+    return isNominalType(unwrappedBaseType(type))
+        && normalized.hasSuffix(".\(expectedTypeName)")
 }
 
-private func containsOpaqueType(_ type: TypeSyntax) -> Bool {
+private func unwrappedBaseType(_ type: TypeSyntax) -> TypeSyntax {
     if let optionalType = type.as(OptionalTypeSyntax.self) {
-        return containsOpaqueType(optionalType.wrappedType)
+        return unwrappedBaseType(optionalType.wrappedType)
     }
 
     if let identifierType = type.as(IdentifierTypeSyntax.self),
@@ -44,25 +45,31 @@ private func containsOpaqueType(_ type: TypeSyntax) -> Bool {
        arguments.count == 1,
        let argument = arguments.first,
        case .type(let wrappedType) = argument.argument {
-        return containsOpaqueType(wrappedType)
+        return unwrappedBaseType(wrappedType)
     }
 
     if let tupleType = type.as(TupleTypeSyntax.self),
        tupleType.elements.count == 1,
        let element = tupleType.elements.first,
        element.firstName == nil {
-        return containsOpaqueType(element.type)
+        return unwrappedBaseType(element.type)
     }
 
-    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self) {
-        if someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.some) {
-            return true
-        }
-        if someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-            return containsOpaqueType(someOrAnyType.constraint)
-        }
+    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
+       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
+        return unwrappedBaseType(someOrAnyType.constraint)
     }
 
+    return type
+}
+
+private func isNominalType(_ type: TypeSyntax) -> Bool {
+    if type.is(IdentifierTypeSyntax.self) {
+        return true
+    }
+    if let memberType = type.as(MemberTypeSyntax.self) {
+        return isNominalType(memberType.baseType)
+    }
     return false
 }
 
@@ -91,9 +98,11 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
         return normalizedTypeText(element.type)
     }
 
-    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
-       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        return normalizedTypeText(someOrAnyType.constraint)
+    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self) {
+        if someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
+            return normalizedTypeText(someOrAnyType.constraint)
+        }
+        return "some " + normalizedTypeText(someOrAnyType.constraint)
     }
 
     return type.trimmedDescription.filter { character in

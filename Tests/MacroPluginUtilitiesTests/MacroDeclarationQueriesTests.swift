@@ -68,7 +68,10 @@ struct MacroDeclarationQueriesTests {
         "Type matching rejects distinct and deceptive spellings",
         arguments: [
             ("some Error", "Error"),
+            ("some Equatable", "someEquatable"),
+            ("(some Equatable)?", "someEquatable?"),
             ("some Swift.Error", "Error"),
+            ("borrowing some Swift.Error", "Error"),
             ("(some Swift.Error)?", "Error?"),
             ("Optional<some Swift.Error>", "Error?"),
             ("Bool", "Bool?"),
