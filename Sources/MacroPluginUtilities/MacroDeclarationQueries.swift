@@ -99,15 +99,15 @@ private indirect enum ExpectedTypeNode {
         returnType: ExpectedTypeNode
     )
     case attributed(
-        specifiers: String,
-        attributes: String,
-        lateSpecifiers: String,
+        specifiers: [TokenKind],
+        attributes: [TokenKind],
+        lateSpecifiers: [TokenKind],
         base: ExpectedTypeNode
     )
     case packExpansion(ExpectedTypeNode)
     case suppressed(ExpectedTypeNode)
     case memberChain(ExpectedMemberChain)
-    case tokenText(String)
+    case tokens([TokenKind])
 }
 
 private struct ExpectedTupleElement {
@@ -129,7 +129,7 @@ private struct ExpectedThrowsClause {
 
 private enum ExpectedGenericArgument {
     case type(ExpectedTypeNode)
-    case expr(String)
+    case expr([TokenKind])
 }
 
 private enum ExpectedSegmentArguments {
@@ -340,9 +340,9 @@ private func compileExpectedType(
             return nil
         }
         return .attributed(
-            specifiers: normalizedTokenText(attributed.specifiers),
-            attributes: normalizedTokenText(attributed.attributes),
-            lateSpecifiers: normalizedTokenText(attributed.lateSpecifiers),
+            specifiers: normalizedTokens(attributed.specifiers),
+            attributes: normalizedTokens(attributed.attributes),
+            lateSpecifiers: normalizedTokens(attributed.lateSpecifiers),
             base: compiledBase
         )
     }
@@ -368,7 +368,7 @@ private func compileExpectedType(
         return .memberChain(compiledChain)
     }
 
-    return .tokenText(normalizedTokenText(unwrapped))
+    return .tokens(normalizedTokens(unwrapped))
 }
 
 private func compileExpectedConstraintType(
@@ -427,18 +427,29 @@ private func compileExpectedComposition(
 private func compileExpectedTupleElementType(
     _ element: TupleTypeElementSyntax
 ) -> ExpectedTypeNode? {
-    guard element.inoutKeyword != nil else {
+    guard let inoutKeyword = element.inoutKeyword else {
         return compileExpectedType(element.type, mode: .normal)
     }
 
-    let parts = splitTupleElementType(element)
-    guard let compiledBase = compileExpectedType(parts.baseType, mode: .normal) else {
+    if let attributed = element.type.as(AttributedTypeSyntax.self) {
+        guard let compiledBase = compileExpectedType(attributed.baseType, mode: .normal) else {
+            return nil
+        }
+        return .attributed(
+            specifiers: [inoutKeyword.tokenKind] + normalizedTokens(attributed.specifiers),
+            attributes: normalizedTokens(attributed.attributes),
+            lateSpecifiers: normalizedTokens(attributed.lateSpecifiers),
+            base: compiledBase
+        )
+    }
+
+    guard let compiledBase = compileExpectedType(element.type, mode: .normal) else {
         return nil
     }
     return .attributed(
-        specifiers: parts.specifiers,
-        attributes: parts.attributes,
-        lateSpecifiers: parts.lateSpecifiers,
+        specifiers: [inoutKeyword.tokenKind],
+        attributes: [],
+        lateSpecifiers: [],
         base: compiledBase
     )
 }
@@ -453,7 +464,7 @@ private func compileExpectedGenericArgument(
         }
         return .type(compiledType)
     case .expr(let expr):
-        return .expr(normalizedTokenText(expr))
+        return .expr(normalizedTokens(expr))
     }
 }
 
@@ -628,9 +639,9 @@ private func typeSyntaxMatches(
             && typeSyntaxMatches(lhsFunction.returnClause.type, expectedReturnType, mode: .normal)
     case .attributed(let expectedSpecifiers, let expectedAttributes, let expectedLateSpecifiers, let expectedBase):
         guard let lhsAttributed = lhs.as(AttributedTypeSyntax.self),
-              normalizedTokenText(lhsAttributed.specifiers) == expectedSpecifiers,
-              normalizedTokenText(lhsAttributed.attributes) == expectedAttributes,
-              normalizedTokenText(lhsAttributed.lateSpecifiers) == expectedLateSpecifiers
+              tokensMatch(lhsAttributed.specifiers, expected: expectedSpecifiers),
+              tokensMatch(lhsAttributed.attributes, expected: expectedAttributes),
+              tokensMatch(lhsAttributed.lateSpecifiers, expected: expectedLateSpecifiers)
         else {
             return false
         }
@@ -652,7 +663,7 @@ private func typeSyntaxMatches(
             return false
         }
         return memberTypeChainsMatch(lhsChain, expectedChain)
-    case .tokenText(let expectedText):
+    case .tokens(let expectedTokens):
         guard opaqueConstraint(of: lhs) == nil,
               standardOptionalWrappedType(lhs) == nil,
               !lhs.is(ImplicitlyUnwrappedOptionalTypeSyntax.self),
@@ -670,7 +681,7 @@ private func typeSyntaxMatches(
         else {
             return false
         }
-        return normalizedTokenText(lhs) == expectedText
+        return tokensMatch(lhs, expected: expectedTokens)
     }
 }
 
@@ -785,7 +796,7 @@ private func tupleElementTypesMatch(
     _ lhs: TupleTypeElementSyntax,
     _ expected: ExpectedTypeNode
 ) -> Bool {
-    guard lhs.inoutKeyword != nil else {
+    guard let inoutKeyword = lhs.inoutKeyword else {
         return typeSyntaxMatches(lhs.type, expected, mode: .normal)
     }
 
@@ -798,45 +809,47 @@ private func tupleElementTypesMatch(
         return false
     }
 
-    let lhsParts = splitTupleElementType(lhs)
-    guard lhsParts.specifiers == expectedSpecifiers,
-          lhsParts.attributes == expectedAttributes,
-          lhsParts.lateSpecifiers == expectedLateSpecifiers
+    if let attributed = lhs.type.as(AttributedTypeSyntax.self) {
+        guard specifiersMatch(
+            leading: inoutKeyword.tokenKind,
+            list: attributed.specifiers,
+            expected: expectedSpecifiers
+        ),
+              tokensMatch(attributed.attributes, expected: expectedAttributes),
+              tokensMatch(attributed.lateSpecifiers, expected: expectedLateSpecifiers)
+        else {
+            return false
+        }
+        return typeSyntaxMatches(attributed.baseType, expectedBase, mode: .normal)
+    }
+
+    guard expectedSpecifiers == [inoutKeyword.tokenKind],
+          expectedAttributes.isEmpty,
+          expectedLateSpecifiers.isEmpty
     else {
         return false
     }
-
-    return typeSyntaxMatches(lhsParts.baseType, expectedBase, mode: .normal)
+    return typeSyntaxMatches(lhs.type, expectedBase, mode: .normal)
 }
 
-private func splitTupleElementType(
-    _ element: TupleTypeElementSyntax
-) -> (specifiers: String, attributes: String, lateSpecifiers: String, baseType: TypeSyntax) {
-    let elementInout = element.inoutKeyword?.text
-    if let attributed = element.type.as(AttributedTypeSyntax.self) {
-        let existingSpecifiers = normalizedTokenText(attributed.specifiers)
-        let specifiers = switch (elementInout, existingSpecifiers.isEmpty) {
-        case (let keyword?, true):
-            keyword
-        case (let keyword?, false):
-            "\(keyword) \(existingSpecifiers)"
-        case (nil, _):
-            existingSpecifiers
-        }
-        return (
-            specifiers: specifiers,
-            attributes: normalizedTokenText(attributed.attributes),
-            lateSpecifiers: normalizedTokenText(attributed.lateSpecifiers),
-            baseType: attributed.baseType
-        )
+private func specifiersMatch(
+    leading: TokenKind,
+    list: TypeSpecifierListSyntax,
+    expected: [TokenKind]
+) -> Bool {
+    guard expected.first == leading else {
+        return false
     }
 
-    return (
-        specifiers: elementInout ?? "",
-        attributes: "",
-        lateSpecifiers: "",
-        baseType: element.type
-    )
+    var index = 1
+    for token in list.tokens(viewMode: .sourceAccurate) {
+        guard index < expected.count, token.tokenKind == expected[index] else {
+            return false
+        }
+        index += 1
+    }
+
+    return index == expected.count
 }
 
 private func isValidFunctionParameterLabel(_ element: TupleTypeElementSyntax) -> Bool {
@@ -1244,36 +1257,27 @@ private func genericArgumentMatches(
     switch (actual, expected) {
     case (.type(let actualType), .type(let expectedType)):
         typeSyntaxMatches(actualType, expectedType, mode: .normal)
-    case (.expr(let actualExpr), .expr(let expectedExpr)):
-        normalizedTokenText(actualExpr) == expectedExpr
+    case (.expr(let actualExpr), .expr(let expectedExprTokens)):
+        tokensMatch(actualExpr, expected: expectedExprTokens)
     default:
         false
     }
 }
 
-private func normalizedTokenText(_ node: some SyntaxProtocol) -> String {
-    var result = ""
-    var previousWasWordToken = false
+private func normalizedTokens(_ node: some SyntaxProtocol) -> [TokenKind] {
+    node.tokens(viewMode: .sourceAccurate).map(\.tokenKind)
+}
 
+private func tokensMatch(_ node: some SyntaxProtocol, expected: [TokenKind]) -> Bool {
+    var index = 0
     for token in node.tokens(viewMode: .sourceAccurate) {
-        let isWordToken = isTypeWordToken(token.tokenKind)
-        if previousWasWordToken && isWordToken {
-            result.append(" ")
+        guard index < expected.count, token.tokenKind == expected[index] else {
+            return false
         }
-        result.append(token.text)
-        previousWasWordToken = isWordToken
+        index += 1
     }
 
-    return result
-}
-
-private func isTypeWordToken(_ kind: TokenKind) -> Bool {
-    switch kind {
-    case .identifier, .keyword, .wildcard, .dollarIdentifier, .integerLiteral, .floatLiteral:
-        true
-    default:
-        false
-    }
+    return index == expected.count
 }
 
 /// Returns whether a variable declaration is an instance property.

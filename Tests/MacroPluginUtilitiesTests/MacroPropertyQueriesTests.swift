@@ -22,6 +22,7 @@ struct MacroPropertyQueriesTests {
         name: String,
         type: String
     ) throws {
+        assertValidTypeFixture(type)
         let classDecl = try parseClass("class Target { \(member) }")
 
         #expect(
@@ -52,6 +53,7 @@ struct MacroPropertyQueriesTests {
         name: String,
         type: String
     ) throws {
+        assertValidTypeFixture(type)
         let classDecl = try parseClass("class Target { \(member) }")
 
         #expect(
@@ -214,6 +216,7 @@ struct MacroPropertyQueriesTests {
         parameterType: String,
         expected: Bool
     ) throws {
+        assertValidTypeFixture(parameterType)
         let classDecl = try parseClass("class Target { \(member) }")
 
         #expect(
@@ -224,6 +227,20 @@ struct MacroPropertyQueriesTests {
             ) == expected
         )
     }
+}
+
+private func assertValidTypeFixture(_ source: String) {
+    guard let first = source.firstIndex(where: { !$0.isWhitespace }),
+          let last = source.lastIndex(where: { !$0.isWhitespace })
+    else {
+        Issue.record("Expected non-empty type fixture")
+        return
+    }
+    let trimmed = String(source[first...last])
+    var parser = Parser(trimmed)
+    let parsed = TypeSyntax.parse(from: &parser)
+    #expect(!parsed.hasError)
+    #expect(parsed.totalLength.utf8Length == trimmed.utf8.count)
 }
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {

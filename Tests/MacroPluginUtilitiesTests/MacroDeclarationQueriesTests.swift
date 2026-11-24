@@ -203,9 +203,11 @@ struct MacroDeclarationQueriesTests {
             ("Int", "Int\n"),
             ("Swift.Int", "  Int \n\t "),
             ("@Sendable nonisolated(nonsending) () -> Swift.Int", "@Sendable nonisolated(nonsending) () -> Int"),
+            ("@Example(1 + +2) () -> Swift.Void", "@Example(1 + +2) () -> Void"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
+        _ = parseTrimmedType(expected)
         #expect(typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
@@ -262,8 +264,7 @@ struct MacroDeclarationQueriesTests {
             ("some [String: Int]", "some [String: Int]"),
             ("some Collection<Swift.Int>", "Collection<Int>"),
             ("@Sendable nonisolated(nonsending) () -> Int", "@Sendable () -> Int"),
-            ("(value: Int) -> Void", "(Int) -> Void"),
-            ("(Int) -> Void", "(value: Int) -> Void"),
+            ("@Example(1 + +2) () -> Void", "@Example(1 ++ 2) () -> Void"),
             ("() -> Int?", "() throws -> Int?"),
             ("() throws(Swift.Error) -> Void", "() throws -> Void"),
             ("(a: Int, b: Int)", "(x:Int,b:Int)"),
@@ -346,6 +347,8 @@ struct MacroDeclarationQueriesTests {
             ("Int", "Int\nFloat"),
             ("Int", "[Int"),
             ("Error", "any any Error"),
+            ("(value: Int) -> Void", "(Int) -> Void"),
+            ("(Int) -> Void", "(value: Int) -> Void"),
         ]
     )
     func typeMatchingRejectsMalformedSyntax(actual: String, expected: String) {
@@ -595,6 +598,16 @@ private func parseType(_ source: String) -> TypeSyntax {
     #expect(!parsed.hasError)
     #expect(parsed.totalLength.utf8Length == source.utf8.count)
     return parsed
+}
+
+private func parseTrimmedType(_ source: String) -> TypeSyntax {
+    guard let first = source.firstIndex(where: { !$0.isWhitespace }),
+          let last = source.lastIndex(where: { !$0.isWhitespace })
+    else {
+        Issue.record("Expected non-empty type fixture")
+        return parseRawType(source)
+    }
+    return parseType(String(source[first...last]))
 }
 
 private func parseRawType(_ source: String) -> TypeSyntax {
