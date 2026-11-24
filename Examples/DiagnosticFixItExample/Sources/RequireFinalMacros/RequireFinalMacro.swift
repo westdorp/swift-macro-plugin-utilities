@@ -14,7 +14,7 @@ private enum RequireFinalValidation {
     case validFinalClass
     case nonClass
     case openClass(ClassDeclSyntax, alreadyFinal: Bool)
-    case classWithOpenMembers(ClassDeclSyntax)
+    case classWithOpenMembers(ClassDeclSyntax, hasNestedClasses: Bool)
     case classWithNestedClasses(ClassDeclSyntax)
     case fixableNonFinalClass(ClassDeclSyntax)
 }
@@ -52,14 +52,17 @@ public struct RequireFinalMacro: PeerMacro {
                 how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
             )
             return []
-        case .classWithOpenMembers(let classDecl):
+        case .classWithOpenMembers(let classDecl, let hasNestedClasses):
+            let how = hasNestedClasses
+                ? "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+                : "Change any 'open' members to 'public' before adding 'final'."
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.openMembers,
                 what: "@RequireFinal requires a final class, but this class contains 'open' member declarations.",
                 why: "Swift forbids 'open' members on a 'final' class.",
-                how: "Change any 'open' members to 'public' before adding 'final'."
+                how: how
             )
             return []
         case .classWithNestedClasses(let classDecl):
@@ -104,10 +107,11 @@ private func validate(_ declaration: some DeclSyntaxProtocol) -> RequireFinalVal
     if hasModifier(named: "final", in: classDecl.modifiers) {
         return .validFinalClass
     }
+    let hasNested = hasNestedClass(in: classDecl.memberBlock)
     if hasOpenMember(in: classDecl.memberBlock.members) {
-        return .classWithOpenMembers(classDecl)
+        return .classWithOpenMembers(classDecl, hasNestedClasses: hasNested)
     }
-    if hasNestedClass(in: classDecl.memberBlock) {
+    if hasNested {
         return .classWithNestedClasses(classDecl)
     }
     return .fixableNonFinalClass(classDecl)

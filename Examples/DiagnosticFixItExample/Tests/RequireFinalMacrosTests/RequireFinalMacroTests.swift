@@ -148,23 +148,42 @@ struct RequireFinalMacroTests {
     @Test(
         "Class with open members suppresses single-modifier fix-it",
         arguments: [
-            """
-            @RequireFinal
-            public class Session {
-                open func configure() {}
-            }
-            """,
-            """
-            @RequireFinal
-            public class Session {
-                #if DEBUG
-                open var value: Int { 0 }
-                #endif
-            }
-            """,
+            (
+                """
+                @RequireFinal
+                public class Session {
+                    open func configure() {}
+                }
+                """,
+                "WHAT: @RequireFinal requires a final class, but this class contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' before adding 'final'."
+            ),
+            (
+                """
+                @RequireFinal
+                public class Session {
+                    #if DEBUG
+                    open var value: Int { 0 }
+                    #endif
+                }
+                """,
+                "WHAT: @RequireFinal requires a final class, but this class contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' before adding 'final'."
+            ),
+            (
+                """
+                @RequireFinal
+                public class Session {
+                    open func configure() {}
+                    class Child: Session {}
+                }
+                """,
+                "WHAT: @RequireFinal requires a final class, but this class contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+            ),
         ]
     )
-    func classWithOpenMembersSuppressesSingleModifierFixIt(source: String) throws {
+    func classWithOpenMembersSuppressesSingleModifierFixIt(
+        source: String,
+        expectedMessage: String
+    ) throws {
         let result = expand(source)
         #expect(result.diagnostics.count == 1)
 
@@ -177,10 +196,7 @@ struct RequireFinalMacroTests {
                 )
         )
         #expect(diagnostic.diagMessage.severity == .error)
-        #expect(
-            diagnostic.message
-                == "WHAT: @RequireFinal requires a final class, but this class contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' before adding 'final'."
-        )
+        #expect(diagnostic.message == expectedMessage)
         #expect(diagnostic.fixIts.isEmpty)
     }
 

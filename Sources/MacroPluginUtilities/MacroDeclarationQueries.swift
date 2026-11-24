@@ -84,6 +84,19 @@ private func typeSyntaxMatches(
         }
     }
 
+    let lhsOpaque = opaqueConstraint(of: lhs)
+    let rhsOpaque = opaqueConstraint(of: rhs)
+    if lhsOpaque != nil || rhsOpaque != nil {
+        guard let lhsConstraint = lhsOpaque,
+              let rhsConstraint = rhsOpaque,
+              isValidOpaqueConstraint(lhsConstraint),
+              isValidOpaqueConstraint(rhsConstraint)
+        else {
+            return false
+        }
+        return typeSyntaxMatches(lhsConstraint, rhsConstraint, allowExistentialUnwrap: false)
+    }
+
     let lhsOptional = standardOptionalWrappedType(lhs)
     let rhsOptional = standardOptionalWrappedType(rhs)
     if lhsOptional != nil || rhsOptional != nil {
@@ -189,7 +202,8 @@ private func typeSyntaxMatches(
         guard let lhsAttributed,
               let rhsAttributed,
               normalizedTokenText(lhsAttributed.specifiers) == normalizedTokenText(rhsAttributed.specifiers),
-              normalizedTokenText(lhsAttributed.attributes) == normalizedTokenText(rhsAttributed.attributes)
+              normalizedTokenText(lhsAttributed.attributes) == normalizedTokenText(rhsAttributed.attributes),
+              normalizedTokenText(lhsAttributed.lateSpecifiers) == normalizedTokenText(rhsAttributed.lateSpecifiers)
         else {
             return false
         }
@@ -340,6 +354,33 @@ private func existentialConstraint(of type: TypeSyntax) -> TypeSyntax? {
     }
 
     return someOrAny.constraint
+}
+
+private func opaqueConstraint(of type: TypeSyntax) -> TypeSyntax? {
+    guard let someOrAny = type.as(SomeOrAnyTypeSyntax.self),
+          someOrAny.someOrAnySpecifier.tokenKind == .keyword(.some)
+    else {
+        return nil
+    }
+
+    return someOrAny.constraint
+}
+
+private func isValidOpaqueConstraint(_ constraint: TypeSyntax) -> Bool {
+    let unwrapped = unwrapGrouping(constraint)
+    if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
+        return isNominalExistentialConstraint(unwrapped)
+    }
+    if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
+        return isNominalExistentialConstraint(suppressed.type)
+    }
+    if let composition = unwrapped.as(CompositionTypeSyntax.self) {
+        return composition.elements.allSatisfy { element in
+            isValidOpaqueConstraint(element.type)
+        }
+    }
+
+    return false
 }
 
 private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
@@ -549,7 +590,11 @@ private func memberTypeChainsMatch(
         else {
             return false
         }
-        return nominalSegmentsMatch(lhs.segments, rhs.segments)
+        return zip(lhs.segments, rhs.segments).allSatisfy { lhsSegment, rhsSegment in
+            lhsSegment.moduleSelector == rhsSegment.moduleSelector
+                && lhsSegment.name == rhsSegment.name
+                && nominalSegmentArgumentsMatch(lhsSegment.arguments, rhsSegment.arguments)
+        }
     default:
         return false
     }
@@ -626,16 +671,6 @@ private func nominalSegmentsMatch(
         if index == 0 && lhsSegment.isStandardOptional && rhsSegment.isStandardOptional {
             // Standard Optional matches symmetrically across Optional<T>, Swift.Optional<T>,
             // Swift::Optional<T>, and T? bases.
-        } else if rhsSegment.moduleSelector == nil {
-            if rhsSegment.isUnqualifiedStandardOptional {
-                guard lhsSegment.moduleSelector == nil || lhsSegment.moduleSelector == "Swift" else {
-                    return false
-                }
-            } else {
-                guard lhsSegment.moduleSelector == nil else {
-                    return false
-                }
-            }
         } else {
             guard lhsSegment.moduleSelector == rhsSegment.moduleSelector else {
                 return false

@@ -14,6 +14,7 @@ struct MacroPropertyQueriesTests {
             ("let value: (any Swift.Error)?", "value", "Error?"),
             ("let `repeat`: Swift.Error", "`repeat`", "Error"),
             ("let other: Int, value: Swift.Error", "value", "Error"),
+            ("let items: some Collection<Swift.Int>", "items", "some Collection<Int>"),
         ]
     )
     func storedLetMatchingAcceptsNormalizedTypes(

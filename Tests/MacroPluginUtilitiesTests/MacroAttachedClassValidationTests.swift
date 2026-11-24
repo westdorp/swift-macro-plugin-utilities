@@ -77,6 +77,13 @@ struct MacroAttachedClassValidationTests {
                 fixItMessages: []
             ),
             MissingRequirement(
+                source: "@MainActor public class Monitor { let player: AVPlayer; open func reload() {}; class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
                 source: "@MainActor class Monitor { let player: AVPlayer; class Child: Monitor {} }",
                 requirement: .finalClass,
                 id: "class-only",

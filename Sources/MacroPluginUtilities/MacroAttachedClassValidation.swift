@@ -132,14 +132,17 @@ public struct MacroAttachedClassValidator {
                     why: requirements.lifecycleOwnershipReason,
                     how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
                 )
-            case .openMembers:
+            case .openMembers(let hasNestedClasses):
+                let how = hasNestedClasses
+                    ? "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+                    : "Change any 'open' members to 'public' before adding 'final'."
                 context.diagnose(
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
                     what: "\(requirements.attributeName) can only be applied to a final class.",
                     why: requirements.lifecycleOwnershipReason,
-                    how: "Change any 'open' members to 'public' before adding 'final'."
+                    how: how
                 )
             case .nestedClasses:
                 context.diagnose(
@@ -254,7 +257,7 @@ public struct MacroAttachedClassValidator {
 
 private enum FinalClassFixItEligibility {
     case openClass(alreadyFinal: Bool)
-    case openMembers
+    case openMembers(hasNestedClasses: Bool)
     case nestedClasses
     case fixable
 }
@@ -267,10 +270,11 @@ private func finalClassFixItEligibility(
             alreadyFinal: hasModifier(named: "final", in: classDeclaration.modifiers)
         )
     }
+    let hasNested = hasNestedClass(in: classDeclaration.memberBlock)
     if hasOpenMember(in: classDeclaration.memberBlock.members) {
-        return .openMembers
+        return .openMembers(hasNestedClasses: hasNested)
     }
-    if hasNestedClass(in: classDeclaration.memberBlock) {
+    if hasNested {
         return .nestedClasses
     }
     return .fixable

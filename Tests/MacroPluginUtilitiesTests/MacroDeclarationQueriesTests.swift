@@ -183,6 +183,12 @@ struct MacroDeclarationQueriesTests {
             ("[Swift.String: Swift.Int].Index", "[String:Int].Index"),
             ("[4 of Swift.Int].Index", "[4 of Int].Index"),
             ("(_ value: Swift.Int) -> Void", "(Int)->Void"),
+            ("some Swift.Error", "some Error"),
+            ("some Collection<Swift.Int>", "some Collection<Int>"),
+            ("borrowing some Collection<Swift.Int>", "borrowing some Collection<Int>"),
+            ("(some Collection<Swift.Int>)?", "Optional<some Collection<Int>>"),
+            ("some Swift.Equatable & Swift.Sendable", "some Equatable & Sendable"),
+            ("@Sendable nonisolated(nonsending) () -> Swift.Int", "@Sendable nonisolated(nonsending) () -> Int"),
         ]
     )
     func typeMatchingAcceptsEquivalentSpellings(actual: String, expected: String) {
@@ -236,6 +242,11 @@ struct MacroDeclarationQueriesTests {
             ("any ~(some Copyable)", "any ~(some Copyable)"),
             ("any (any P).Item", "any (any P).Item"),
             ("any ~(any P).Item", "any ~(any P).Item"),
+            ("some (some Error)", "some (some Error)"),
+            ("some (any Error)", "some (any Error)"),
+            ("some Swift.Error.Type", "some Error.Type"),
+            ("some Collection<Swift.Int>", "Collection<Int>"),
+            ("@Sendable nonisolated(nonsending) () -> Int", "@Sendable () -> Int"),
             ("(value: Int) -> Void", "(Int) -> Void"),
             ("(Int) -> Void", "(value: Int) -> Void"),
             ("() -> Int?", "() throws -> Int?"),
@@ -343,6 +354,9 @@ struct MacroDeclarationQueriesTests {
             ("MyModule::Optional<Int>", "Int?", false),
             ("MyModule::Optional<Int>.Marker", "Optional<Int>.Marker", false),
             ("MyModule::Int", "Swift::Int", false),
+            ("[Int].Swift::Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
+            ("Container.Swift::Optional<Int>.Marker", "Container.Optional<Int>.Marker", false),
+            ("[Int].Swift.Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
         ]
     )
     func moduleSelectorsPreserveQualificationAndOptionalIsolation(
