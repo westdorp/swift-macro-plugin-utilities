@@ -39,7 +39,7 @@ func typeMatches(_ type: TypeSyntax, expectedType: TypeSyntax) -> Bool {
         return false
     }
 
-    return typeSyntaxMatches(type, expectedType, allowExistentialUnwrap: true)
+    return typeSyntaxMatches(type, expectedType, mode: .normal)
 }
 
 func parseExpectedType(_ text: String) -> TypeSyntax? {
@@ -59,53 +59,55 @@ func parseExpectedType(_ text: String) -> TypeSyntax? {
     return parsed
 }
 
+private enum TypeMatchMode {
+    case normal
+    case exact
+    case existentialConstraint
+    case opaqueOrCompositionConstraint
+    case nominalConstraint
+}
+
 private func typeSyntaxMatches(
     _ actual: TypeSyntax,
     _ expected: TypeSyntax,
-    allowExistentialUnwrap: Bool
+    mode: TypeMatchMode
 ) -> Bool {
     let lhs = unwrapGrouping(actual)
     let rhs = unwrapGrouping(expected)
 
-    if allowExistentialUnwrap {
-        if let lhsExistential = existentialConstraint(of: lhs) {
-            guard isValidExistentialConstraint(lhsExistential) else {
-                return false
-            }
-            return typeSyntaxMatches(lhsExistential, rhs, allowExistentialUnwrap: true)
+    switch mode {
+    case .existentialConstraint, .opaqueOrCompositionConstraint, .nominalConstraint:
+        return constraintTypeSyntaxMatches(lhs, rhs, mode: mode)
+    case .normal:
+        let lhsExistential = existentialConstraint(of: lhs)
+        let rhsExistential = existentialConstraint(of: rhs)
+        if let lhsConstraint = lhsExistential, let rhsConstraint = rhsExistential {
+            return typeSyntaxMatches(lhsConstraint, rhsConstraint, mode: .existentialConstraint)
         }
-        if let rhsExistential = existentialConstraint(of: rhs) {
-            guard isValidExistentialConstraint(rhsExistential) else {
-                return false
-            }
-            return typeSyntaxMatches(lhs, rhsExistential, allowExistentialUnwrap: true)
+        if let lhsConstraint = lhsExistential {
+            return typeSyntaxMatches(lhsConstraint, rhs, mode: .existentialConstraint)
         }
-    } else {
+        if let rhsConstraint = rhsExistential {
+            return typeSyntaxMatches(lhs, rhsConstraint, mode: .existentialConstraint)
+        }
+    case .exact:
         let lhsExistential = existentialConstraint(of: lhs)
         let rhsExistential = existentialConstraint(of: rhs)
         if lhsExistential != nil || rhsExistential != nil {
-            guard let lhsConstraint = lhsExistential,
-                  let rhsConstraint = rhsExistential,
-                  isValidExistentialConstraint(lhsConstraint),
-                  isValidExistentialConstraint(rhsConstraint)
-            else {
+            guard let lhsConstraint = lhsExistential, let rhsConstraint = rhsExistential else {
                 return false
             }
-            return typeSyntaxMatches(lhsConstraint, rhsConstraint, allowExistentialUnwrap: false)
+            return typeSyntaxMatches(lhsConstraint, rhsConstraint, mode: .existentialConstraint)
         }
     }
 
     let lhsOpaque = opaqueConstraint(of: lhs)
     let rhsOpaque = opaqueConstraint(of: rhs)
     if lhsOpaque != nil || rhsOpaque != nil {
-        guard let lhsConstraint = lhsOpaque,
-              let rhsConstraint = rhsOpaque,
-              isValidOpaqueConstraint(lhsConstraint),
-              isValidOpaqueConstraint(rhsConstraint)
-        else {
+        guard let lhsConstraint = lhsOpaque, let rhsConstraint = rhsOpaque else {
             return false
         }
-        return typeSyntaxMatches(lhsConstraint, rhsConstraint, allowExistentialUnwrap: false)
+        return typeSyntaxMatches(lhsConstraint, rhsConstraint, mode: .opaqueOrCompositionConstraint)
     }
 
     let lhsOptional = standardOptionalWrappedType(lhs)
@@ -114,7 +116,7 @@ private func typeSyntaxMatches(
         guard let lhsWrapped = lhsOptional, let rhsWrapped = rhsOptional else {
             return false
         }
-        return typeSyntaxMatches(lhsWrapped, rhsWrapped, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhsWrapped, rhsWrapped, mode: .normal)
     }
 
     let lhsIUO = lhs.as(ImplicitlyUnwrappedOptionalTypeSyntax.self)
@@ -123,7 +125,7 @@ private func typeSyntaxMatches(
         guard let lhsIUO, let rhsIUO else {
             return false
         }
-        return typeSyntaxMatches(lhsIUO.wrappedType, rhsIUO.wrappedType, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhsIUO.wrappedType, rhsIUO.wrappedType, mode: .normal)
     }
 
     let lhsMetatype = lhs.as(MetatypeTypeSyntax.self)
@@ -135,31 +137,16 @@ private func typeSyntaxMatches(
         else {
             return false
         }
-        return typeSyntaxMatches(
-            lhsMetatype.baseType,
-            rhsMetatype.baseType,
-            allowExistentialUnwrap: false
-        )
+        return typeSyntaxMatches(lhsMetatype.baseType, rhsMetatype.baseType, mode: .exact)
     }
 
     let lhsComposition = lhs.as(CompositionTypeSyntax.self)
     let rhsComposition = rhs.as(CompositionTypeSyntax.self)
     if lhsComposition != nil || rhsComposition != nil {
-        guard let lhsComposition,
-              let rhsComposition,
-              lhsComposition.elements.count == rhsComposition.elements.count
-        else {
+        guard let lhsComposition, let rhsComposition else {
             return false
         }
-        return zip(lhsComposition.elements, rhsComposition.elements).allSatisfy { lElement, rElement in
-            isValidOpaqueConstraint(lElement.type)
-                && isValidOpaqueConstraint(rElement.type)
-                && typeSyntaxMatches(
-                    lElement.type,
-                    rElement.type,
-                    allowExistentialUnwrap: false
-                )
-        }
+        return compositionTypesMatch(lhsComposition, rhsComposition)
     }
 
     let lhsArray = lhs.as(ArrayTypeSyntax.self)
@@ -168,7 +155,7 @@ private func typeSyntaxMatches(
         guard let lhsArray, let rhsArray else {
             return false
         }
-        return typeSyntaxMatches(lhsArray.element, rhsArray.element, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhsArray.element, rhsArray.element, mode: .normal)
     }
 
     let lhsDictionary = lhs.as(DictionaryTypeSyntax.self)
@@ -177,8 +164,8 @@ private func typeSyntaxMatches(
         guard let lhsDictionary, let rhsDictionary else {
             return false
         }
-        return typeSyntaxMatches(lhsDictionary.key, rhsDictionary.key, allowExistentialUnwrap: true)
-            && typeSyntaxMatches(lhsDictionary.value, rhsDictionary.value, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhsDictionary.key, rhsDictionary.key, mode: .normal)
+            && typeSyntaxMatches(lhsDictionary.value, rhsDictionary.value, mode: .normal)
     }
 
     let lhsInlineArray = lhs.as(InlineArrayTypeSyntax.self)
@@ -220,11 +207,7 @@ private func typeSyntaxMatches(
         else {
             return false
         }
-        return typeSyntaxMatches(
-            lhsAttributed.baseType,
-            rhsAttributed.baseType,
-            allowExistentialUnwrap: allowExistentialUnwrap
-        )
+        return typeSyntaxMatches(lhsAttributed.baseType, rhsAttributed.baseType, mode: mode)
     }
 
     let lhsPackExpansion = lhs.as(PackExpansionTypeSyntax.self)
@@ -236,24 +219,20 @@ private func typeSyntaxMatches(
         return typeSyntaxMatches(
             lhsPackExpansion.repetitionPattern,
             rhsPackExpansion.repetitionPattern,
-            allowExistentialUnwrap: true
+            mode: .normal
         )
     }
 
     let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self)
     let rhsSuppressed = rhs.as(SuppressedTypeSyntax.self)
     if lhsSuppressed != nil || rhsSuppressed != nil {
-        guard let lhsSuppressed,
-              let rhsSuppressed,
-              isNominalExistentialConstraint(lhsSuppressed.type),
-              isNominalExistentialConstraint(rhsSuppressed.type)
-        else {
+        guard let lhsSuppressed, let rhsSuppressed else {
             return false
         }
         return typeSyntaxMatches(
             lhsSuppressed.type,
             rhsSuppressed.type,
-            allowExistentialUnwrap: false
+            mode: .nominalConstraint
         )
     }
 
@@ -263,6 +242,80 @@ private func typeSyntaxMatches(
     }
 
     return normalizedTokenText(lhs) == normalizedTokenText(rhs)
+}
+
+private func constraintTypeSyntaxMatches(
+    _ lhs: TypeSyntax,
+    _ rhs: TypeSyntax,
+    mode: TypeMatchMode
+) -> Bool {
+    if mode == .existentialConstraint,
+       let lhsMetatype = lhs.as(MetatypeTypeSyntax.self),
+       let rhsMetatype = rhs.as(MetatypeTypeSyntax.self) {
+        guard lhsMetatype.metatypeSpecifier.text == rhsMetatype.metatypeSpecifier.text else {
+            return false
+        }
+        return typeSyntaxMatches(
+            lhsMetatype.baseType,
+            rhsMetatype.baseType,
+            mode: .existentialConstraint
+        )
+    }
+
+    if mode != .nominalConstraint,
+       let lhsComposition = lhs.as(CompositionTypeSyntax.self),
+       let rhsComposition = rhs.as(CompositionTypeSyntax.self) {
+        return compositionTypesMatch(lhsComposition, rhsComposition)
+    }
+
+    if mode != .nominalConstraint,
+       let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self),
+       let rhsSuppressed = rhs.as(SuppressedTypeSyntax.self) {
+        return typeSyntaxMatches(
+            lhsSuppressed.type,
+            rhsSuppressed.type,
+            mode: .nominalConstraint
+        )
+    }
+
+    guard standardOptionalWrappedType(lhs) == nil,
+          standardOptionalWrappedType(rhs) == nil,
+          let lhsChain = memberTypeChain(for: lhs),
+          let rhsChain = memberTypeChain(for: rhs),
+          isValidConstraintMemberBase(lhsChain.nonNominalBase),
+          isValidConstraintMemberBase(rhsChain.nonNominalBase)
+    else {
+        return false
+    }
+
+    return memberTypeChainsMatch(lhsChain, rhsChain)
+}
+
+private func compositionTypesMatch(
+    _ lhs: CompositionTypeSyntax,
+    _ rhs: CompositionTypeSyntax
+) -> Bool {
+    guard lhs.elements.count == rhs.elements.count else {
+        return false
+    }
+
+    return zip(lhs.elements, rhs.elements).allSatisfy { lElement, rElement in
+        typeSyntaxMatches(
+            lElement.type,
+            rElement.type,
+            mode: .opaqueOrCompositionConstraint
+        )
+    }
+}
+
+private func isValidConstraintMemberBase(_ base: TypeSyntax?) -> Bool {
+    guard let base else {
+        return true
+    }
+
+    return base.is(ArrayTypeSyntax.self)
+        || base.is(DictionaryTypeSyntax.self)
+        || base.is(InlineArrayTypeSyntax.self)
 }
 
 private func tupleElementsMatch(
@@ -302,7 +355,7 @@ private func tupleElementTypesMatch(
     _ rhs: TupleTypeElementSyntax
 ) -> Bool {
     guard lhs.inoutKeyword != nil || rhs.inoutKeyword != nil else {
-        return typeSyntaxMatches(lhs.type, rhs.type, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhs.type, rhs.type, mode: .normal)
     }
 
     let lhsParts = splitTupleElementType(lhs)
@@ -314,7 +367,7 @@ private func tupleElementTypesMatch(
         return false
     }
 
-    return typeSyntaxMatches(lhsParts.baseType, rhsParts.baseType, allowExistentialUnwrap: true)
+    return typeSyntaxMatches(lhsParts.baseType, rhsParts.baseType, mode: .normal)
 }
 
 private func splitTupleElementType(
@@ -368,7 +421,7 @@ private func functionTypesMatch(
     return typeSyntaxMatches(
         lhs.returnClause.type,
         rhs.returnClause.type,
-        allowExistentialUnwrap: true
+        mode: .normal
     )
 }
 
@@ -391,7 +444,7 @@ private func effectSpecifiersMatch(
         case (nil, nil):
             return true
         case (let lhsError?, let rhsError?):
-            return typeSyntaxMatches(lhsError, rhsError, allowExistentialUnwrap: true)
+            return typeSyntaxMatches(lhsError, rhsError, mode: .normal)
         default:
             return false
         }
@@ -433,69 +486,6 @@ private func opaqueConstraint(of type: TypeSyntax) -> TypeSyntax? {
     }
 
     return someOrAny.constraint
-}
-
-private func isValidOpaqueConstraint(_ constraint: TypeSyntax) -> Bool {
-    let unwrapped = unwrapGrouping(constraint)
-    if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
-        return isNominalExistentialConstraint(unwrapped)
-    }
-    if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
-        return isNominalExistentialConstraint(suppressed.type)
-    }
-    if let composition = unwrapped.as(CompositionTypeSyntax.self) {
-        return composition.elements.allSatisfy { element in
-            isValidOpaqueConstraint(element.type)
-        }
-    }
-
-    return false
-}
-
-private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
-    let unwrapped = unwrapGrouping(constraint)
-    if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
-        return isNominalExistentialConstraint(unwrapped)
-    }
-    if let suppressed = unwrapped.as(SuppressedTypeSyntax.self) {
-        return isNominalExistentialConstraint(suppressed.type)
-    }
-    if let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
-        return isValidExistentialConstraint(metatype.baseType)
-    }
-    if let composition = unwrapped.as(CompositionTypeSyntax.self) {
-        return composition.elements.allSatisfy { element in
-            isValidExistentialConstraint(element.type)
-        }
-    }
-
-    return false
-}
-
-private func isNominalExistentialConstraint(_ type: TypeSyntax) -> Bool {
-    var current = unwrapGrouping(type)
-    guard optionalWrappedType(current) == nil else {
-        return false
-    }
-
-    var walkedMember = false
-    while let member = current.as(MemberTypeSyntax.self) {
-        walkedMember = true
-        current = unwrapGrouping(member.baseType)
-    }
-
-    if current.is(IdentifierTypeSyntax.self) {
-        return true
-    }
-
-    guard walkedMember else {
-        return false
-    }
-
-    return current.is(OptionalTypeSyntax.self)
-        || current.is(ArrayTypeSyntax.self)
-        || current.is(DictionaryTypeSyntax.self)
-        || current.is(InlineArrayTypeSyntax.self)
 }
 
 private func standardOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
@@ -684,7 +674,7 @@ private func memberTypeChainsMatch(
         return nominalSegmentsMatch(lhs, rhs)
     case (let lhsBase?, let rhsBase?):
         guard lhs.segments.count == rhs.segments.count,
-              typeSyntaxMatches(lhsBase, rhsBase, allowExistentialUnwrap: false)
+              typeSyntaxMatches(lhsBase, rhsBase, mode: .exact)
         else {
             return false
         }
@@ -747,11 +737,6 @@ private func nominalSegmentsMatch(
     let lhsHasParenthesizedTypeOwner = lhs.rootWasParenthesized && !lhsHadLeadingSelector
     let rhsHasParenthesizedTypeOwner = rhs.rootWasParenthesized && !rhsHadLeadingSelector
 
-    if (lhsHadLeadingSelector && rhsHasParenthesizedTypeOwner)
-        || (rhsHadLeadingSelector && lhsHasParenthesizedTypeOwner) {
-        return false
-    }
-
     let lhsSegments = lhsHasParenthesizedTypeOwner
         ? expandedLHS
         : canonicalizeLeadingStandardOptional(expandedLHS)
@@ -764,6 +749,11 @@ private func nominalSegmentsMatch(
     }
 
     let droppedPrefixCount = lhsSegments.count - rhsSegments.count
+    if droppedPrefixCount == 0,
+       (lhsHadLeadingSelector && rhsHasParenthesizedTypeOwner)
+        || (rhsHadLeadingSelector && lhsHasParenthesizedTypeOwner) {
+        return false
+    }
     let droppedPrefix = lhsSegments.prefix(droppedPrefixCount)
     guard droppedPrefix.allSatisfy({ $0.arguments.isEmpty && $0.moduleSelector == nil }) else {
         return false
@@ -816,12 +806,12 @@ private func nominalSegmentArgumentsMatch(
         guard let rhsWrapped = rhs.singleTypeArgument else {
             return false
         }
-        return typeSyntaxMatches(lhsWrapped, rhsWrapped, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhsWrapped, rhsWrapped, mode: .normal)
     case (_, .syntheticOptional(let rhsWrapped)):
         guard let lhsWrapped = lhs.singleTypeArgument else {
             return false
         }
-        return typeSyntaxMatches(lhsWrapped, rhsWrapped, allowExistentialUnwrap: true)
+        return typeSyntaxMatches(lhsWrapped, rhsWrapped, mode: .normal)
     default:
         return false
     }
@@ -833,7 +823,7 @@ private func genericArgumentMatches(
 ) -> Bool {
     switch (actual, expected) {
     case (.type(let actualType), .type(let expectedType)):
-        typeSyntaxMatches(actualType, expectedType, allowExistentialUnwrap: true)
+        typeSyntaxMatches(actualType, expectedType, mode: .normal)
     case (.expr(let actualExpr), .expr(let expectedExpr)):
         normalizedTokenText(actualExpr) == normalizedTokenText(expectedExpr)
     default:

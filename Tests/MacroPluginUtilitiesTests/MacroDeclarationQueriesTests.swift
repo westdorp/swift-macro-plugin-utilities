@@ -250,7 +250,6 @@ struct MacroDeclarationQueriesTests {
             ("MyModule.Optional<Int,>", "Optional<Int,>"),
             ("Box<(repeat each T)>", "Box<repeat each T>"),
             ("Box<repeat each T>", "Box<(repeat each T)>"),
-            ("[Int", "[Int]"),
             ("[Swift.Int].Index", "Index"),
             ("any ~(any Copyable)", "any ~(any Copyable)"),
             ("any ~(some Copyable)", "any ~(some Copyable)"),
@@ -263,7 +262,6 @@ struct MacroDeclarationQueriesTests {
             ("some [String: Int]", "some [String: Int]"),
             ("some Collection<Swift.Int>", "Collection<Int>"),
             ("@Sendable nonisolated(nonsending) () -> Int", "@Sendable () -> Int"),
-            ("Int", "Int\nFloat"),
             ("(value: Int) -> Void", "(Int) -> Void"),
             ("(Int) -> Void", "(value: Int) -> Void"),
             ("() -> Int?", "() throws -> Int?"),
@@ -282,8 +280,6 @@ struct MacroDeclarationQueriesTests {
             ("(Swift).Optional<Int>.Marker", "Int?.Marker"),
             ("(Swift).Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
             ("(Swift).Optional<Int>", "Int?"),
-            ("Int", "Int Float"),
-            ("Int", ""),
             ("Box<MyModule.Optional<Int>>", "Box<Optional<Int>>"),
             ("MyModule.Optional<Int>.Type", "Optional<Int>.Type"),
             ("MyModule.Optional<Int>?", "Optional<Int>?"),
@@ -341,19 +337,44 @@ struct MacroDeclarationQueriesTests {
         #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
     }
 
+    @Test(
+        "Type matching rejects malformed actual or expected syntax",
+        arguments: [
+            ("[Int", "[Int]"),
+            ("Int", "Int Float"),
+            ("Int", ""),
+            ("Int", "Int\nFloat"),
+            ("Int", "[Int"),
+        ]
+    )
+    func typeMatchingRejectsMalformedSyntax(actual: String, expected: String) {
+        #expect(!typeMatches(parseRawType(actual), expectedTypeName: expected))
+    }
+
     @Test("Existential markers normalize while opaque markers remain distinct")
     func existentialAndOpaqueTypesRemainAsymmetric() {
         #expect(typeMatches(parseType("any Error"), expectedTypeName: "Error"))
         #expect(!typeMatches(parseType("some Error"), expectedTypeName: "Error"))
     }
 
-    @Test("Deeply nested Optional leaf mismatches stay linear")
-    func deeplyNestedOptionalLeafMismatchStaysLinear() {
+    @Test("Deeply nested Optional and composition trees stay linear")
+    func deeplyNestedOptionalAndCompositionTreesStayLinear() {
         let depth = 24
-        let actual = String(repeating: "Optional<", count: depth) + "Int" + String(repeating: ">", count: depth)
-        let expected = String(repeating: "Optional<", count: depth) + "String" + String(repeating: ">", count: depth)
+        let actualOptional = String(repeating: "Optional<", count: depth) + "Int" + String(repeating: ">", count: depth)
+        let expectedOptional = String(repeating: "Optional<", count: depth) + "String" + String(repeating: ">", count: depth)
 
-        #expect(!typeMatches(parseType(actual), expectedTypeName: expected))
+        #expect(!typeMatches(parseType(actualOptional), expectedTypeName: expectedOptional))
+
+        let compositionDepth = 16
+        let nestedComposition = (0..<compositionDepth).reversed().reduce("Leaf") { acc, index in
+            "P\(index) & (\(acc))"
+        }
+        let mismatchedComposition = (0..<compositionDepth).reversed().reduce("OtherLeaf") { acc, index in
+            "P\(index) & (\(acc))"
+        }
+
+        #expect(typeMatches(parseType(nestedComposition), expectedTypeName: nestedComposition))
+        #expect(!typeMatches(parseType(nestedComposition), expectedTypeName: mismatchedComposition))
     }
 
     @Test("Synthetic element-level inout markers match equivalent inout function types and reject unmarked types")
@@ -437,6 +458,9 @@ struct MacroDeclarationQueriesTests {
             ("Container.Foreign::Owner.Result<Int>", "Container.Foreign::Owner.Result<Int>", true),
             ("(Swift).Int", "Swift::Int", false),
             ("Swift::Int", "(Swift).Int", false),
+            ("Swift::Unicode.Scalar", "(Unicode).Scalar", true),
+            ("Swift::Unicode.Scalar", "(Swift).Unicode.Scalar", false),
+            ("(Swift).Unicode.Scalar", "Swift::Unicode.Scalar", false),
             ("(Swift::Int).Marker", "Swift::Int.Marker", true),
         ]
     )
@@ -561,6 +585,13 @@ private func parseDeclaration(_ source: String) -> DeclSyntax? {
 }
 
 private func parseType(_ source: String) -> TypeSyntax {
+    let parsed = parseRawType(source)
+    #expect(!parsed.hasError)
+    #expect(parsed.totalLength.utf8Length == source.utf8.count)
+    return parsed
+}
+
+private func parseRawType(_ source: String) -> TypeSyntax {
     var parser = Parser(source)
     return TypeSyntax.parse(from: &parser)
 }
