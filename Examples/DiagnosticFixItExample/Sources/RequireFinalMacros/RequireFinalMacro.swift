@@ -14,9 +14,16 @@ private enum RequireFinalValidation {
     case validFinalClass
     case nonClass
     case openClass(ClassDeclSyntax, alreadyFinal: Bool)
-    case classWithOpenMembers(ClassDeclSyntax, alreadyFinal: Bool, hasNestedClasses: Bool)
+    case finalClassWithOpenMembers(ClassDeclSyntax, hasNestedClasses: Bool)
+    case nonFinalClassWithOpenMembers(ClassDeclSyntax, hasNestedClasses: Bool)
     case classWithNestedClasses(ClassDeclSyntax)
     case fixableNonFinalClass(ClassDeclSyntax)
+}
+
+private enum OpenMemberPresence {
+    case none
+    case conditionalOnly
+    case unconditional
 }
 
 public struct RequireFinalMacro: PeerMacro {
@@ -52,22 +59,28 @@ public struct RequireFinalMacro: PeerMacro {
                 how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
             )
             return []
-        case .classWithOpenMembers(let classDecl, let alreadyFinal, let hasNestedClasses):
-            let what = alreadyFinal
-                ? "@RequireFinal cannot accept a 'final' class that contains 'open' member declarations."
-                : "@RequireFinal requires a final class, but this class contains 'open' member declarations."
-            let how = if alreadyFinal {
-                "Change any 'open' members to 'public' so they are valid on a 'final' class."
-            } else if hasNestedClasses {
-                "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
-            } else {
-                "Change any 'open' members to 'public' before adding 'final'."
-            }
+        case .finalClassWithOpenMembers(let classDecl, let hasNestedClasses):
+            let how = hasNestedClasses
+                ? "Change any 'open' members to 'public', review nested or local classes, and update any subclassing so they are valid on a 'final' class."
+                : "Change any 'open' members to 'public' so they are valid on a 'final' class."
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.openMembers,
-                what: what,
+                what: "@RequireFinal cannot accept a 'final' class that contains 'open' member declarations.",
+                why: "Swift forbids 'open' members on a 'final' class.",
+                how: how
+            )
+            return []
+        case .nonFinalClassWithOpenMembers(let classDecl, let hasNestedClasses):
+            let how = hasNestedClasses
+                ? "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+                : "Change any 'open' members to 'public' before adding 'final'."
+            context.diagnose(
+                classDecl.name,
+                domain: diagnosticDomain,
+                id: RequireFinalDiagnosticID.openMembers,
+                what: "@RequireFinal requires a final class, but this class contains 'open' member declarations.",
                 why: "Swift forbids 'open' members on a 'final' class.",
                 how: how
             )
@@ -109,27 +122,36 @@ private func validate(_ declaration: some DeclSyntaxProtocol) -> RequireFinalVal
     if hasModifier(named: "open", in: classDecl.modifiers) {
         return .openClass(classDecl, alreadyFinal: isFinal)
     }
-    let hasNested = hasNestedClass(in: classDecl.memberBlock)
-    if hasOpenMember(in: classDecl.memberBlock.members) {
-        return .classWithOpenMembers(classDecl, alreadyFinal: isFinal, hasNestedClasses: hasNested)
-    }
+
+    let openMembers = openMemberPresence(in: classDecl.memberBlock.members)
     if isFinal {
-        return .validFinalClass
+        switch openMembers {
+        case .unconditional:
+            return .finalClassWithOpenMembers(
+                classDecl,
+                hasNestedClasses: hasNestedClass(in: classDecl.memberBlock)
+            )
+        case .none, .conditionalOnly:
+            return .validFinalClass
+        }
     }
-    if hasNested {
-        return .classWithNestedClasses(classDecl)
+
+    let hasNested = hasNestedClass(in: classDecl.memberBlock)
+    switch openMembers {
+    case .unconditional, .conditionalOnly:
+        return .nonFinalClassWithOpenMembers(classDecl, hasNestedClasses: hasNested)
+    case .none:
+        return hasNested ? .classWithNestedClasses(classDecl) : .fixableNonFinalClass(classDecl)
     }
-    return .fixableNonFinalClass(classDecl)
 }
 
-private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
+private func openMemberPresence(in members: MemberBlockItemListSyntax) -> OpenMemberPresence {
+    var sawConditionalOpenMember = false
+
     for member in members {
         if let ifConfig = member.decl.as(IfConfigDeclSyntax.self) {
-            for clause in ifConfig.clauses {
-                if case .decls(let conditionalMembers) = clause.elements,
-                   hasOpenMember(in: conditionalMembers) {
-                    return true
-                }
+            if hasAnyOpenMember(in: ifConfig) {
+                sawConditionalOpenMember = true
             }
             continue
         }
@@ -140,6 +162,19 @@ private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
 
         if let modified = member.decl.asProtocol(WithModifiersSyntax.self),
            hasModifier(named: "open", in: modified.modifiers) {
+            return .unconditional
+        }
+    }
+
+    return sawConditionalOpenMember ? .conditionalOnly : .none
+}
+
+private func hasAnyOpenMember(in ifConfig: IfConfigDeclSyntax) -> Bool {
+    for clause in ifConfig.clauses {
+        guard case .decls(let conditionalMembers) = clause.elements else {
+            continue
+        }
+        if openMemberPresence(in: conditionalMembers) != .none {
             return true
         }
     }

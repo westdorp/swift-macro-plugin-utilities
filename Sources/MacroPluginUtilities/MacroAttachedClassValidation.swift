@@ -130,26 +130,28 @@ public struct MacroAttachedClassValidator {
                     why: requirements.lifecycleOwnershipReason,
                     how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or \(removal)."
                 )
-            case .openMembers(let alreadyFinal, let hasNestedClasses):
-                let what = alreadyFinal
-                    ? "\(requirements.attributeName) cannot accept a 'final' class that contains 'open' member declarations."
-                    : "\(requirements.attributeName) can only be applied to a final class."
-                let why = alreadyFinal
-                    ? "Swift forbids 'open' members on a 'final' class."
-                    : requirements.lifecycleOwnershipReason
-                let how = if alreadyFinal {
-                    "Change any 'open' members to 'public' so they are valid on a 'final' class."
-                } else if hasNestedClasses {
-                    "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
-                } else {
-                    "Change any 'open' members to 'public' before adding 'final'."
-                }
+            case .finalClassWithOpenMembers(let hasNestedClasses):
+                let how = hasNestedClasses
+                    ? "Change any 'open' members to 'public', review nested or local classes, and update any subclassing so they are valid on a 'final' class."
+                    : "Change any 'open' members to 'public' so they are valid on a 'final' class."
                 context.diagnose(
                     className,
                     domain: requirements.diagnosticDomain,
                     id: requirements.diagnosticIDs.classOnly,
-                    what: what,
-                    why: why,
+                    what: "\(requirements.attributeName) cannot accept a 'final' class that contains 'open' member declarations.",
+                    why: "Swift forbids 'open' members on a 'final' class.",
+                    how: how
+                )
+            case .nonFinalWithOpenMembers(let hasNestedClasses):
+                let how = hasNestedClasses
+                    ? "Change any 'open' members to 'public', review nested or local classes and update any subclassing, and add the 'final' modifier manually."
+                    : "Change any 'open' members to 'public' before adding 'final'."
+                context.diagnose(
+                    className,
+                    domain: requirements.diagnosticDomain,
+                    id: requirements.diagnosticIDs.classOnly,
+                    what: "\(requirements.attributeName) can only be applied to a final class.",
+                    why: requirements.lifecycleOwnershipReason,
                     how: how
                 )
             case .nestedClasses:
@@ -276,7 +278,8 @@ public struct MacroAttachedClassValidator {
 private enum FinalClassValidationState {
     case validFinalClass
     case openClass(alreadyFinal: Bool)
-    case openMembers(alreadyFinal: Bool, hasNestedClasses: Bool)
+    case finalClassWithOpenMembers(hasNestedClasses: Bool)
+    case nonFinalWithOpenMembers(hasNestedClasses: Bool)
     case nestedClasses
     case fixable
 
@@ -288,6 +291,12 @@ private enum FinalClassValidationState {
     }
 }
 
+private enum OpenMemberPresence {
+    case none
+    case conditionalOnly
+    case unconditional
+}
+
 private func finalClassValidationState(
     for classDeclaration: ClassDeclSyntax
 ) -> FinalClassValidationState {
@@ -295,27 +304,35 @@ private func finalClassValidationState(
     if hasModifier(named: "open", in: classDeclaration.modifiers) {
         return .openClass(alreadyFinal: isFinal)
     }
-    let hasNested = hasNestedClass(in: classDeclaration.memberBlock)
-    if hasOpenMember(in: classDeclaration.memberBlock.members) {
-        return .openMembers(alreadyFinal: isFinal, hasNestedClasses: hasNested)
-    }
+
+    let openMembers = openMemberPresence(in: classDeclaration.memberBlock.members)
     if isFinal {
-        return .validFinalClass
+        switch openMembers {
+        case .unconditional:
+            return .finalClassWithOpenMembers(
+                hasNestedClasses: hasNestedClass(in: classDeclaration.memberBlock)
+            )
+        case .none, .conditionalOnly:
+            return .validFinalClass
+        }
     }
-    if hasNested {
-        return .nestedClasses
+
+    let hasNested = hasNestedClass(in: classDeclaration.memberBlock)
+    switch openMembers {
+    case .unconditional, .conditionalOnly:
+        return .nonFinalWithOpenMembers(hasNestedClasses: hasNested)
+    case .none:
+        return hasNested ? .nestedClasses : .fixable
     }
-    return .fixable
 }
 
-private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
+private func openMemberPresence(in members: MemberBlockItemListSyntax) -> OpenMemberPresence {
+    var sawConditionalOpenMember = false
+
     for member in members {
         if let ifConfig = member.decl.as(IfConfigDeclSyntax.self) {
-            for clause in ifConfig.clauses {
-                if case .decls(let conditionalMembers) = clause.elements,
-                   hasOpenMember(in: conditionalMembers) {
-                    return true
-                }
+            if hasAnyOpenMember(in: ifConfig) {
+                sawConditionalOpenMember = true
             }
             continue
         }
@@ -326,6 +343,19 @@ private func hasOpenMember(in members: MemberBlockItemListSyntax) -> Bool {
 
         if let modified = member.decl.asProtocol(WithModifiersSyntax.self),
            hasModifier(named: "open", in: modified.modifiers) {
+            return .unconditional
+        }
+    }
+
+    return sawConditionalOpenMember ? .conditionalOnly : .none
+}
+
+private func hasAnyOpenMember(in ifConfig: IfConfigDeclSyntax) -> Bool {
+    for clause in ifConfig.clauses {
+        guard case .decls(let conditionalMembers) = clause.elements else {
+            continue
+        }
+        if openMemberPresence(in: conditionalMembers) != .none {
             return true
         }
     }

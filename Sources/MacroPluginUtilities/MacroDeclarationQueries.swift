@@ -35,13 +35,16 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
 }
 
 private func parseExpectedType(_ text: String) -> TypeSyntax? {
-    guard text.contains(where: { !$0.isWhitespace }) else {
+    guard let firstNonWhitespace = text.firstIndex(where: { !$0.isWhitespace }),
+          let lastNonWhitespace = text.lastIndex(where: { !$0.isWhitespace })
+    else {
         return nil
     }
 
-    var parser = Parser(text)
+    let trimmed = String(text[firstNonWhitespace...lastNonWhitespace])
+    var parser = Parser(trimmed)
     let parsed = TypeSyntax.parse(from: &parser)
-    guard !parsed.hasError, parsed.totalLength.utf8Length == text.utf8.count else {
+    guard !parsed.hasError, parsed.totalLength.utf8Length == trimmed.utf8.count else {
         return nil
     }
 
@@ -419,8 +422,18 @@ private func isNominalExistentialConstraint(_ type: TypeSyntax) -> Bool {
         current = unwrapGrouping(member.baseType)
     }
 
-    return current.is(IdentifierTypeSyntax.self)
-        || (walkedMember && current.is(OptionalTypeSyntax.self))
+    if current.is(IdentifierTypeSyntax.self) {
+        return true
+    }
+
+    guard walkedMember else {
+        return false
+    }
+
+    return current.is(OptionalTypeSyntax.self)
+        || current.is(ArrayTypeSyntax.self)
+        || current.is(DictionaryTypeSyntax.self)
+        || current.is(InlineArrayTypeSyntax.self)
 }
 
 private func standardOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {

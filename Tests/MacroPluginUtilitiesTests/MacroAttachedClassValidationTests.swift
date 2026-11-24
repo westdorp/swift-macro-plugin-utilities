@@ -32,6 +32,25 @@ struct MacroAttachedClassValidationTests {
     }
 
     @Test(
+        "Accepts final classes with inactive-branch open members or nested open classes",
+        arguments: [
+            "@MainActor public final class Monitor {\n    let player: AVPlayer\n    #if false\n    open func reload() {}\n    #endif\n}",
+            "@MainActor public final class Monitor { let player: AVPlayer; open class Nested {} }",
+        ]
+    )
+    func acceptsFinalClassWithConditionalOpenMembersOrNestedOpenClass(source: String) throws {
+        let validator = MacroAttachedClassValidator(
+            classDeclaration: try parseClass(source),
+            requirements: observerRequirements
+        )
+        let context = BasicMacroExpansionContext(lexicalContext: [])
+
+        #expect(validator.satisfies(.finalClass))
+        #expect(validator.validate(.finalClass, in: context))
+        #expect(context.diagnostics.isEmpty)
+    }
+
+    @Test(
         "Rejects and diagnoses each missing attached-class requirement",
         arguments: [
             MissingRequirement(
@@ -88,6 +107,13 @@ struct MacroAttachedClassValidationTests {
                 requirement: .finalClass,
                 id: "class-only",
                 message: "WHAT: @Observer cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' so they are valid on a 'final' class.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor public final class Monitor { let player: AVPlayer; open func reload() {}; class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public', review nested or local classes, and update any subclassing so they are valid on a 'final' class.",
                 fixItMessages: []
             ),
             MissingRequirement(

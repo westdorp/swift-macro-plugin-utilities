@@ -58,13 +58,17 @@
 
 ### Attached-class final validation
 
-- `MacroAttachedClassValidator.satisfies(.finalClass)` now rejects classes
-  marked both `open` and `final`.
+- `MacroAttachedClassValidator.satisfies(.finalClass)` and
+  `validate(.finalClass, in:)` now reject classes marked both `open` and
+  `final`, as well as already-`final` classes that declare unconditional `open`
+  members (conditional `#if` branches on already-`final` classes remain
+  accepted).
 - `MacroAttachedClassValidator.validate(.finalClass, in:)` now withholds the
   automatic `Add 'final' modifier` fix-it for `open` classes, classes with
   `open` members, and classes containing nested or local class declarations, and
-  updates its fixable `HOW` guidance to remind callers to confirm no external
-  subclasses exist before adding `final`.
+  updates the `WHAT`/`WHY`/`HOW` wording for those conflict cases as well as the
+  fixable case's `HOW` reminder to confirm no external subclasses exist before
+  adding `final`.
 
 ---
 

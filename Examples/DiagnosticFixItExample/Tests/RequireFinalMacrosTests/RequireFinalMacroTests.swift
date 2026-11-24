@@ -30,6 +30,7 @@ struct RequireFinalMacroTests {
             "@RequireFinal\nfinal class Session {}\n",
             "@RequireFinal\npublic final class Session {}\n",
             "@RequireFinal\npublic final class Session {\n    open class Nested {}\n}\n",
+            "@RequireFinal\npublic final class Session {\n    #if false\n    open func configure() {}\n    #endif\n}\n",
         ]
     )
     func finalClassExpandsWithoutDiagnostics(source: String) {
@@ -187,6 +188,16 @@ struct RequireFinalMacroTests {
                 }
                 """,
                 "WHAT: @RequireFinal cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public' so they are valid on a 'final' class."
+            ),
+            (
+                """
+                @RequireFinal
+                public final class Session {
+                    open func configure() {}
+                    class Child: Session {}
+                }
+                """,
+                "WHAT: @RequireFinal cannot accept a 'final' class that contains 'open' member declarations. WHY: Swift forbids 'open' members on a 'final' class. HOW: Change any 'open' members to 'public', review nested or local classes, and update any subclassing so they are valid on a 'final' class."
             ),
         ]
     )
