@@ -2,12 +2,12 @@ SWIFT ?= swift
 PYTHON ?= python3
 STRICT_TEST_FLAGS := --sanitize=thread -Xswiftc -strict-concurrency=complete
 
-.PHONY: ci-test test test-ci-pairing test-guardrails test-dependency-owners test-strict build
+.PHONY: ci-test test test-ci-pairing test-guardrails test-dependency-owners test-strict test-example build
 
 ci-test:
 	$(MAKE) test
 
-test: test-ci-pairing test-guardrails test-dependency-owners test-strict
+test: test-ci-pairing test-guardrails test-dependency-owners test-strict test-example
 
 test-ci-pairing:
 	$(PYTHON) -I -B Scripts/Tests/test_check_ci_pairing.py
@@ -23,6 +23,10 @@ test-dependency-owners:
 
 test-strict:
 	$(SWIFT) test $(STRICT_TEST_FLAGS)
+
+test-example:
+	$(SWIFT) test --package-path Examples/DiagnosticFixItExample $(STRICT_TEST_FLAGS)
+	$(SWIFT) run --package-path Examples/DiagnosticFixItExample $(STRICT_TEST_FLAGS) DiagnosticFixItExample
 
 build:
 	$(SWIFT) build -Xswiftc -strict-concurrency=complete

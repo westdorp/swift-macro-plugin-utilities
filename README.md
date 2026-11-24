@@ -1,21 +1,84 @@
 # swift-macro-plugin-utilities
 
-`MacroPluginUtilities` provides focused syntactic queries, diagnostics, and
-deterministic fix-its for Swift macro-plugin implementations. It is not a macro
-framework, semantic type checker, or runtime library.
+`swift-macro-plugin-utilities` provides syntactic queries, structured diagnostics, and deterministic fix-its for Swift macro plugins, alongside the [`swift-source-guardrails`](Documentation/SourceGuardrails.md) syntax checker.
 
-The package also ships [`swift-source-guardrails`](Documentation/SourceGuardrails.md),
-a SwiftParser-based executable for repository-owned token bans and counted
-allowlists. It emits JSON plus human diagnostics and leaves library APIs unchanged.
-Swift Package Manager resolves the executable's `swift-argument-parser`
-dependency even for consumers that use only the `MacroPluginUtilities` library.
+## Package stack
+
+This package is the standalone foundation layer of the three-package stack and does not depend on the packages above it:
+
+```text
+swift-macro-plugin-utilities          (diagnostics, fix-its, syntax queries, swift-source-guardrails)
+      ▲
+      │
+swift-provider-message                (@ProviderMessage typed RPC, wire codec, @XPC bridge)
+      ▲
+      │
+swift-network-extension-macros        (@ProviderConfiguration, @TunnelStateMachine, @ConnectionState, @TunnelDiagnostics, NE adapter)
+```
+
+`MacroPluginUtilities` is a utility library for Swift macro-plugin implementations. It is not a macro framework, semantic type checker, or runtime library.
+
+## Quick start
+
+Add the package dependency to `Package.swift`:
+
+```swift
+.package(url: "https://github.com/westdorp/swift-macro-plugin-utilities.git", .upToNextMinor(from: "0.7.0"))
+```
+
+Add the `MacroPluginUtilities` product to your macro target:
+
+```swift
+.product(name: "MacroPluginUtilities", package: "swift-macro-plugin-utilities")
+```
+
+If another dependency already exposes a `MacroPluginUtilities` module, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` in your target dependencies.
+
+Write an attached macro that checks a syntactic contract and emits one structured diagnostic with a deterministic fix-it:
+
+```swift
+import MacroPluginUtilities
+import SwiftSyntax
+import SwiftSyntaxMacros
+
+public struct RequireFinalMacro: MemberMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) -> [DeclSyntax] {
+        guard let classDecl = declaration.as(ClassDeclSyntax.self),
+              !hasModifier(named: "open", in: classDecl.modifiers),
+              !hasModifier(named: "final", in: classDecl.modifiers) else { return [] }
+        let fixIt = makeAddFinalFixIt(
+            for: classDecl,
+            fixItMessage: MacroFixItMessage("Add 'final' modifier", domain: "RequireFinalMacro")
+        )
+        context.diagnose(
+            classDecl.name, domain: "RequireFinalMacro", id: "missing-final",
+            what: "@RequireFinal requires a final class.",
+            why: "Subclasses would bypass the type's invariants.",
+            how: "Add the 'final' modifier to this class declaration.",
+            fixIts: [fixIt]
+        )
+        return []
+    }
+}
+```
+
+Attaching `@RequireFinal` to `class Session {}` produces:
+
+```text
+error: WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Add the 'final' modifier to this class declaration.
+fix-it: Add 'final' modifier -> final class Session {}
+```
+
+See [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample) for the complete runnable package, including `open`-class and non-class handling plus fix-it application tests.
 
 ## Diagnostic contract
 
-Macro diagnostics must say what is wrong, why it matters, and how to fix it.
-`MacroDiagnosticMessage` accepts those fragments directly, preserves a stable
-caller-defined identity and severity, and normalizes whitespace without
-interpreting diagnostic content:
+Macro diagnostics must state what is wrong, why it matters, and how to fix it. `MacroDiagnosticMessage` accepts those fragments directly, preserves a stable caller-defined identity and severity, and normalizes whitespace without interpreting diagnostic content:
 
 ```swift
 let message = MacroDiagnosticMessage(
@@ -28,74 +91,62 @@ let message = MacroDiagnosticMessage(
 )
 ```
 
-The result is:
+The rendered text is:
 
 ```text
 WHAT: State enum is missing. WHY: The macro needs a finite state domain. HOW: Add a nested State enum.
 ```
 
-For error diagnostics, `MacroExpansionContext.diagnose` offers the same
-structured contract with either a string ID or a consumer-owned
-`RawRepresentable<String>` ID. Empty fragments render a label-specific
-`[diagnostic authoring defect — empty … fragment]` sentinel so malformed
-diagnostics remain visible without terminating the compiler plugin.
+For error diagnostics, `MacroExpansionContext.diagnose` offers the same structured contract with either a string ID or a consumer-owned `RawRepresentable<String>` ID. Empty fragments render a label-specific `[diagnostic authoring defect — empty … fragment]` sentinel so malformed diagnostics stay visible without terminating the compiler plugin.
 
 ## Scope and limits
 
-The package provides:
+`MacroPluginUtilities` provides:
 
-- declaration queries: `hasModifier`, `hasAttribute`,
-  `attributeNameMatches`, `typeMatches`, `isInstanceVariable`,
-  `existingMemberNames`, `renderEnumCasePattern`, and `enumCaseLabel`;
-- property queries: `hasStoredLetProperty`,
-  `unsupportedUninitializedStoredProperties`, `hasConflictingInitializer`,
-  and the `InlineInitializedStoredProperty` projection returned by
-  `inlineInitializedStoredProperty`;
-- deterministic fix-its: `makeAddFinalFixIt`, `makeAddMainActorFixIt`, and
-  `makeRemoveInitializerFixIt`;
-- `Sendable` utilities: `hasSendableConformance`, `sourceFile(containing:)`,
-  `inheritedTypesContainSendable`, and `sendableExtensionIfNeeded`;
-- structured diagnostics: `MacroDiagnosticMessage`, `MacroFixItMessage`,
-  `MacroDiagnosticText.compose`, and both `MacroExpansionContext.diagnose`
-  overloads;
-- source locations: `sourceLocationDirective`, a `#sourceLocation` directive
-  that reports errors in generated code on the user's declaration;
-- attached-class validation: `MacroAttachedClassRequirements` and its
-  `DiagnosticIDs`, `MacroAttachedClassRequirement`, and
-  `MacroAttachedClassValidator`.
+- declaration queries: `hasModifier`, `hasAttribute`, `attributeNameMatches`, `typeMatches`, `isInstanceVariable`, `existingMemberNames`, `renderEnumCasePattern`, and `enumCaseLabel`;
+- property queries: `hasStoredLetProperty`, `unsupportedUninitializedStoredProperties`, `hasConflictingInitializer`, and the `InlineInitializedStoredProperty` projection returned by `inlineInitializedStoredProperty`;
+- deterministic fix-its: `makeAddFinalFixIt`, `makeAddMainActorFixIt`, and `makeRemoveInitializerFixIt`;
+- `Sendable` utilities: `hasSendableConformance`, `sourceFile(containing:)`, `inheritedTypesContainSendable`, and `sendableExtensionIfNeeded`;
+- structured diagnostics: `MacroDiagnosticMessage`, `MacroFixItMessage`, `MacroDiagnosticText.compose`, and both `MacroExpansionContext.diagnose` overloads;
+- source locations: `sourceLocationDirective`, a `#sourceLocation` directive that reports errors in generated code on the user's declaration;
+- attached-class validation: `MacroAttachedClassRequirements` and its `DiagnosticIDs`, `MacroAttachedClassRequirement`, and `MacroAttachedClassValidator`.
 
-Matching is intentionally syntactic. It does not resolve imports, type aliases,
-overloads, or compiler-known type equivalence. Type matching normalizes optional
-spellings, whitespace, single-element parentheses, qualification, and
-existential `any`; opaque `some` remains distinct. `Sendable` extension
-discovery visits source-file and declaration-group declaration lists, not
-function, closure, initializer, accessor, or expression bodies. Extensions
-inside `#if` blocks are not discovered: the active build configuration is
-unknowable syntactically, so conditionally compiled conformances stay the
-caller's responsibility.
+Matching is syntactic. It does not resolve imports, type aliases, overloads, or compiler-known type equivalence. Type matching normalizes optional spellings, whitespace, single-element parentheses, qualification, and existential `any`; opaque `some` remains distinct. `Sendable` extension discovery visits source-file and declaration-group declaration lists, not function, closure, initializer, accessor, or expression bodies. Extensions inside `#if` blocks are not discovered because the active build configuration is unknowable syntactically, so conditionally compiled conformances remain the caller's responsibility.
 
-See [MIGRATION.md](MIGRATION.md) for version-specific signature and behavior
-changes.
+The package also ships [`swift-source-guardrails`](Documentation/SourceGuardrails.md), a SwiftParser-based executable for repository-owned token bans and counted allowlists. It emits JSON plus human diagnostics and leaves library APIs unchanged. Swift Package Manager resolves the executable's `swift-argument-parser` dependency even for consumers that use only the `MacroPluginUtilities` library.
+
+See [MIGRATION.md](MIGRATION.md) for version-specific signature and behavior changes.
+
+## Examples
+
+[`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample) is a standalone SwiftPM package that defines `@RequireFinal`, runs an unsigned executable, and verifies diagnostics and fix-it edits with Swift Testing:
+
+```sh
+swift test --package-path Examples/DiagnosticFixItExample
+swift run --package-path Examples/DiagnosticFixItExample DiagnosticFixItExample
+```
 
 ## Development
 
-Before pushing, run `preflight run-gates --part <id>` for each local part in
-[`gate-profile.toml`](gate-profile.toml), outside `nix develop`, on a Mac with
-the Xcode named by `.xcode-version` installed, Python 3.11 or newer (for `tomllib`), and Ruby (for Psych). Currently that is:
+Build the package:
 
 ```sh
-preflight run-gates --part test
+swift build
 ```
 
-See [preflight's README](https://github.com/westdorp/preflight#requirements-and-profile-commands)
-for gate-profile and evidence requirements.
+Run the package tests:
 
-The gate includes `make test-dependency-owners`, which fails when a non-test
-target reaches a package outside `swiftlang`, `apple`, and `westdorp`;
-test-only packages are exempt. The docstring of
-`Scripts/check-dependency-owners.py` explains why.
+```sh
+swift test
+```
 
-Build with complete strict-concurrency checking using:
+Run the full test suite, the example package, and repository checks:
+
+```sh
+make test
+```
+
+Build with complete strict-concurrency checking:
 
 ```sh
 make build
@@ -103,27 +154,10 @@ make build
 
 ## Platform floor
 
-The package requires macOS 13 or later on the compiler host, matching its
-macOS 13-or-later consumers and supporting throwing output writes in
-`swift-source-guardrails`. Macro plugins do not execute
-in downstream app processes, and the declaration does not set an app deployment
-target. The package gate verifies this host configuration on macOS 26.
-
-## Provenance
-
-This repository is the canonical, living home of utilities originally frozen
-from the `PlaybackStateMachineMacros` package in the
-`swift-playback-machine-macros-private` repository at revision
-`214443b8fb0d1ab228ab8b79d6c17d4f3497a7b6`. The frozen revision records the
-extraction origin; development continues here.
+The package requires macOS 13 or later on the compiler host, supporting throwing output writes in `swift-source-guardrails`. Macro plugins do not execute in downstream app processes, and the manifest does not set an app deployment target.
 
 ## Compatibility
 
-Patch releases preserve source compatibility within each minor line. Before
-`1.0`, a new minor release may include breaking API changes and will provide
-migration notes.
+Patch releases preserve source compatibility within each minor line. Before `1.0`, a new minor release may include breaking API changes and provides migration notes in [MIGRATION.md](MIGRATION.md).
 
-Policy for westdorp packages that use these utilities: require them with
-`.upToNextMinor(from:)` on the same minor, so they admit the same release and
-cannot conflict with each other, and move them together on each new minor. At
-`1.0` they move to `from:`.
+Before `1.0`, use `.upToNextMinor(from:)` when multiple packages in the same dependency graph depend on this library so they resolve the same minor release.

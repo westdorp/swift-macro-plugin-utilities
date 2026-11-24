@@ -10,25 +10,30 @@ cd "$repo_root"
 
 echo "Checking test guardrails..."
 
-tests_path="Tests"
+tests_paths=(
+  "Tests"
+  "Examples/DiagnosticFixItExample/Tests"
+)
 
-if [[ ! -d "$tests_path" ]]; then
-  echo "ERROR: Test source directory is missing: $tests_path" >&2
-  exit 2
-fi
+for tests_path in "${tests_paths[@]}"; do
+  if [[ ! -d "$tests_path" ]]; then
+    echo "ERROR: Test source directory is missing: $tests_path" >&2
+    exit 2
+  fi
 
-if ! swift_file_count="$(
-  /usr/bin/find "$tests_path" -type f -name '*.swift' -print \
-    | /usr/bin/awk 'END { print NR }'
-)"; then
-  echo "ERROR: Could not count Swift test sources in $tests_path." >&2
-  exit 2
-fi
+  if ! swift_file_count="$(
+    /usr/bin/find "$tests_path" -type f -name '*.swift' -print \
+      | /usr/bin/awk 'END { print NR }'
+  )"; then
+    echo "ERROR: Could not count Swift test sources in $tests_path." >&2
+    exit 2
+  fi
 
-if [[ "$swift_file_count" -eq 0 ]]; then
-  echo "ERROR: No Swift test sources found in $tests_path." >&2
-  exit 2
-fi
+  if [[ "$swift_file_count" -eq 0 ]]; then
+    echo "ERROR: No Swift test sources found in $tests_path." >&2
+    exit 2
+  fi
+done
 
 guardrail_status=0
 
@@ -37,7 +42,7 @@ scan_rule() {
   local violation_message="$2"
   local scan_status
 
-  if /usr/bin/grep -REn --include='*.swift' -- "$pattern" "$tests_path"; then
+  if /usr/bin/grep -REn --include='*.swift' -- "$pattern" "${tests_paths[@]}"; then
     echo "ERROR: $violation_message" >&2
     if [[ "$guardrail_status" -lt 1 ]]; then
       guardrail_status=1
