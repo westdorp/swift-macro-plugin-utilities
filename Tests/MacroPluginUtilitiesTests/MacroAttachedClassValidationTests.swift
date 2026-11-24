@@ -89,7 +89,7 @@ struct MacroAttachedClassValidationTests {
                 fixItMessages: []
             ),
             MissingRequirement(
-                source: "@MainActor public class Monitor { let player: AVPlayer; #if DEBUG\n open func reload() {}\n #endif }",
+                source: "@MainActor public class Monitor {\n    let player: AVPlayer\n    #if DEBUG\n    open func reload() {}\n    #endif\n}",
                 requirement: .finalClass,
                 id: "class-only",
                 message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Change any 'open' members to 'public' before adding 'final'.",
@@ -314,6 +314,7 @@ private let trackerRequirements = MacroAttachedClassRequirements(
 
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
     let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
     return try #require(
         sourceFile.statements.compactMap { $0.item.as(ClassDeclSyntax.self) }.first
     )

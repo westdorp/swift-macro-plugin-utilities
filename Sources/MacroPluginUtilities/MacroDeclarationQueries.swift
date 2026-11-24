@@ -27,14 +27,22 @@ public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String)
 
 /// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
-    guard !type.hasError, let expectedType = parseExpectedType(expectedTypeName) else {
+    guard let expectedType = parseExpectedType(expectedTypeName) else {
+        return false
+    }
+
+    return typeMatches(type, expectedType: expectedType)
+}
+
+func typeMatches(_ type: TypeSyntax, expectedType: TypeSyntax) -> Bool {
+    guard !type.hasError else {
         return false
     }
 
     return typeSyntaxMatches(type, expectedType, allowExistentialUnwrap: true)
 }
 
-private func parseExpectedType(_ text: String) -> TypeSyntax? {
+func parseExpectedType(_ text: String) -> TypeSyntax? {
     guard let firstNonWhitespace = text.firstIndex(where: { !$0.isWhitespace }),
           let lastNonWhitespace = text.lastIndex(where: { !$0.isWhitespace })
     else {
@@ -144,11 +152,13 @@ private func typeSyntaxMatches(
             return false
         }
         return zip(lhsComposition.elements, rhsComposition.elements).allSatisfy { lElement, rElement in
-            typeSyntaxMatches(
-                lElement.type,
-                rElement.type,
-                allowExistentialUnwrap: allowExistentialUnwrap
-            )
+            !unwrapGrouping(lElement.type).is(SomeOrAnyTypeSyntax.self)
+                && !unwrapGrouping(rElement.type).is(SomeOrAnyTypeSyntax.self)
+                && typeSyntaxMatches(
+                    lElement.type,
+                    rElement.type,
+                    allowExistentialUnwrap: false
+                )
         }
     }
 
@@ -575,11 +585,13 @@ private struct NominalASTSegment {
 private struct MemberTypeChain {
     let nonNominalBase: TypeSyntax?
     let segments: [NominalASTSegment]
+    let rootWasParenthesized: Bool
 }
 
 private func memberTypeChain(for type: TypeSyntax) -> MemberTypeChain? {
     var reversed: [NominalASTSegment] = []
     var current = type
+    var currentWasParenthesized = false
 
     while true {
         if let memberType = current.as(MemberTypeSyntax.self) {
@@ -590,7 +602,9 @@ private func memberTypeChain(for type: TypeSyntax) -> MemberTypeChain? {
                     arguments: memberType.genericArgumentClause.map { .syntax($0) } ?? .none
                 )
             )
-            current = unwrapGrouping(memberType.baseType)
+            let unwrappedBase = unwrapGrouping(memberType.baseType)
+            currentWasParenthesized = unwrappedBase.id != memberType.baseType.id
+            current = unwrappedBase
             continue
         }
 
@@ -603,7 +617,11 @@ private func memberTypeChain(for type: TypeSyntax) -> MemberTypeChain? {
                 )
             )
             reversed.reverse()
-            return MemberTypeChain(nonNominalBase: nil, segments: reversed)
+            return MemberTypeChain(
+                nonNominalBase: nil,
+                segments: reversed,
+                rootWasParenthesized: currentWasParenthesized
+            )
         }
 
         if !reversed.isEmpty, let optionalType = current.as(OptionalTypeSyntax.self) {
@@ -615,12 +633,20 @@ private func memberTypeChain(for type: TypeSyntax) -> MemberTypeChain? {
                 )
             )
             reversed.reverse()
-            return MemberTypeChain(nonNominalBase: nil, segments: reversed)
+            return MemberTypeChain(
+                nonNominalBase: nil,
+                segments: reversed,
+                rootWasParenthesized: false
+            )
         }
 
         if !reversed.isEmpty {
             reversed.reverse()
-            return MemberTypeChain(nonNominalBase: current, segments: reversed)
+            return MemberTypeChain(
+                nonNominalBase: current,
+                segments: reversed,
+                rootWasParenthesized: false
+            )
         }
 
         return nil
@@ -633,7 +659,7 @@ private func memberTypeChainsMatch(
 ) -> Bool {
     switch (lhs.nonNominalBase, rhs.nonNominalBase) {
     case (nil, nil):
-        return nominalSegmentsMatch(lhs.segments, rhs.segments)
+        return nominalSegmentsMatch(lhs, rhs)
     case (let lhsBase?, let rhsBase?):
         guard lhs.segments.count == rhs.segments.count,
               typeSyntaxMatches(lhsBase, rhsBase, allowExistentialUnwrap: false)
@@ -691,13 +717,25 @@ private func canonicalizeLeadingStandardOptional(
 }
 
 private func nominalSegmentsMatch(
-    _ rawLHSSegments: [NominalASTSegment],
-    _ rawRHSSegments: [NominalASTSegment]
+    _ lhs: MemberTypeChain,
+    _ rhs: MemberTypeChain
 ) -> Bool {
-    let (expandedLHS, _) = expandLeadingModuleSelector(rawLHSSegments)
-    let (expandedRHS, rhsHadLeadingSelector) = expandLeadingModuleSelector(rawRHSSegments)
-    let lhsSegments = canonicalizeLeadingStandardOptional(expandedLHS)
-    let rhsSegments = canonicalizeLeadingStandardOptional(expandedRHS)
+    let (expandedLHS, lhsHadLeadingSelector) = expandLeadingModuleSelector(lhs.segments)
+    let (expandedRHS, rhsHadLeadingSelector) = expandLeadingModuleSelector(rhs.segments)
+    let lhsHasParenthesizedTypeOwner = lhs.rootWasParenthesized && !lhsHadLeadingSelector
+    let rhsHasParenthesizedTypeOwner = rhs.rootWasParenthesized && !rhsHadLeadingSelector
+
+    if (lhsHadLeadingSelector && rhsHasParenthesizedTypeOwner)
+        || (rhsHadLeadingSelector && lhsHasParenthesizedTypeOwner) {
+        return false
+    }
+
+    let lhsSegments = lhsHasParenthesizedTypeOwner
+        ? expandedLHS
+        : canonicalizeLeadingStandardOptional(expandedLHS)
+    let rhsSegments = rhsHasParenthesizedTypeOwner
+        ? expandedRHS
+        : canonicalizeLeadingStandardOptional(expandedRHS)
 
     guard rhsSegments.count <= lhsSegments.count else {
         return false

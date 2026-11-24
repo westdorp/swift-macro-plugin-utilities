@@ -172,6 +172,8 @@ struct MacroDeclarationQueriesTests {
             ("Shapes.Optional<4>", "Optional<4>"),
             ("Shapes.Optional<-1>", "Optional<-1>"),
             ("Swift.Optional<Int>.Marker", "Optional<Int>.Marker"),
+            ("(Swift.Optional<Int>).Marker", "Int?.Marker"),
+            ("(Swift).Optional<Int>.Marker", "(Swift).Optional<Int>.Marker"),
             ("Namespace.Swift.Optional<Int>.Marker", "Namespace.Swift.Optional<Int>.Marker"),
             ("[4 of Int]?", "[4 of Int]?"),
             ("[4 of Swift.Int]", "[4 of Int]"),
@@ -270,6 +272,12 @@ struct MacroDeclarationQueriesTests {
             ("[Int]", "any [Int]"),
             ("Equatable & Sendable?", "any (Equatable & Sendable?)"),
             ("(any P & Q).Type", "(any ((any P) & Q)).Type"),
+            ("any P & Q", "(any P) & Q"),
+            ("(any P) & Q", "(any P) & Q"),
+            ("(some P) & Q", "(some P) & Q"),
+            ("(Swift).Optional<Int>.Marker", "Int?.Marker"),
+            ("(Swift).Optional<Int>.Marker", "Swift.Optional<Int>.Marker"),
+            ("(Swift).Optional<Int>", "Int?"),
             ("Int", "Int Float"),
             ("Int", ""),
             ("Box<MyModule.Optional<Int>>", "Box<Optional<Int>>"),
@@ -410,6 +418,9 @@ struct MacroDeclarationQueriesTests {
             ("[Int].Swift.Optional<Int>.Marker", "[Int].Optional<Int>.Marker", false),
             ("Container.Foreign::Owner.Result<Int>", "Result<Int>", false),
             ("Container.Foreign::Owner.Result<Int>", "Container.Foreign::Owner.Result<Int>", true),
+            ("(Swift).Int", "Swift::Int", false),
+            ("Swift::Int", "(Swift).Int", false),
+            ("(Swift::Int).Marker", "Swift::Int.Marker", true),
         ]
     )
     func moduleSelectorsPreserveQualificationAndOptionalIsolation(
