@@ -127,7 +127,7 @@ public struct MacroAttachedClassValidator {
                     id: requirements.diagnosticIDs.classOnly,
                     what: "\(requirements.attributeName) can only be applied to a final class.",
                     why: requirements.lifecycleOwnershipReason,
-                    how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', or remove \(requirements.attributeName)."
+                    how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or remove \(requirements.attributeName)."
                 )
             case .openMembers:
                 context.diagnose(

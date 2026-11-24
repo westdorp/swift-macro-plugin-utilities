@@ -45,14 +45,21 @@ struct MacroAttachedClassValidationTests {
                 source: "@MainActor open class Monitor { let player: AVPlayer }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', or remove @Observer.",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', update or remove any subclasses, or remove @Observer.",
+                fixItMessages: []
+            ),
+            MissingRequirement(
+                source: "@MainActor open class Monitor { let player: AVPlayer; final class Child: Monitor {} }",
+                requirement: .finalClass,
+                id: "class-only",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public final', change any 'open' members to 'public', update or remove any subclasses, or remove @Observer.",
                 fixItMessages: []
             ),
             MissingRequirement(
                 source: "@MainActor open final class Monitor { let player: AVPlayer }",
                 requirement: .finalClass,
                 id: "class-only",
-                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public', change any 'open' members to 'public', or remove @Observer.",
+                message: "WHAT: @Observer can only be applied to a final class. WHY: Lifecycle state requires stable identity. HOW: Replace 'open' with 'public', change any 'open' members to 'public', update or remove any subclasses, or remove @Observer.",
                 fixItMessages: []
             ),
             MissingRequirement(

@@ -20,15 +20,30 @@
   `(()->Void)?` and `(Equatable&Sendable)?` instead of `()->Void?` and
   `Equatable&Sendable?`).
 - Optional spellings (`T?`, `Optional<T>`, and `Swift.Optional<T>`) now match
-  symmetrically in both directions, while other module-qualified types named
-  `Optional` (such as `MyModule.Optional<Int>` and
+  symmetrically in both directions (including trailing-comma specializations
+  such as `Optional<Int,>` and owner segments such as `Optional<Int>.Marker` vs
+  `Swift.Optional<Int>.Marker`), while other module-qualified types named
+  `Optional` (such as `MyModule.Optional<Int>`, `MyModule::Optional<Int>`, and
   `Namespace.Swift.Optional<Int>`) no longer match unqualified `Optional<Int>`,
   `Swift.Optional<Int>`, or `Int?`.
+- Expected strings now normalize existential `any` symmetrically with actual
+  types (for example `Error` matches `any Error`, and `(any Error)?` matches
+  `Swift.Optional<any Error>`), while keeping `(any Error).Type` distinct from
+  `any Error.Type` and rejecting malformed or nested `any` constraints (such as
+  `any Error?`, `any (any Error)`, `any ()`, and `(any ((any P) & Q)).Type`).
 - Qualified protocol compositions (`any Swift.Equatable & Swift.Sendable`),
-  array, dictionary, and inline-array element types (`[Swift.Int]`,
-  `[Swift.String: Swift.Int?]`, `[4 of Swift.Int]`), parenthesized metatype
-  bases (`(Swift.Int).Type`, `(any Swift.Error).Type`), and Swift 6.2 value
-  generic arguments (`Swift.InlineArray<4, Swift.Int>`) now match structurally.
+  tuples (`(Swift.Int, Swift.String)`), array, dictionary, and inline-array
+  element types (`[Swift.Int]`, `[Swift.String: Swift.Int?]`,
+  `[4 of Swift.Int]`), parenthesized metatype bases (`(Swift.Int).Type`,
+  `(any Swift.Error).Type`), and Swift 6.2 value generic arguments
+  (`Swift.InlineArray<4, Swift.Int>`) now match structurally.
+
+### Fix-it helpers
+
+- `makeAddFinalFixIt` now always moves the `class` keyword's leading trivia onto
+  the inserted `final` modifier so multiline modifiers and comments between an
+  existing modifier and `class` stay separated rather than gluing onto the
+  previous modifier token.
 
 ### Attached-class final validation
 

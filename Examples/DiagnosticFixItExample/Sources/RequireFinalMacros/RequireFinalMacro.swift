@@ -48,7 +48,7 @@ public struct RequireFinalMacro: PeerMacro {
                 id: RequireFinalDiagnosticID.openClass,
                 what: "@RequireFinal cannot be applied to an 'open' class.",
                 why: "An 'open' class allows external subclassing, which conflicts with 'final'.",
-                how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', or remove @RequireFinal."
+                how: "Replace 'open' with '\(replacement)', change any 'open' members to 'public', update or remove any subclasses, or remove @RequireFinal."
             )
             return []
         case .classWithOpenMembers(let classDecl):

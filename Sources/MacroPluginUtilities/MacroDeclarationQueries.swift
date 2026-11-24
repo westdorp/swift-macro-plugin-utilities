@@ -1,3 +1,4 @@
+import SwiftParser
 import SwiftSyntax
 
 /// Returns whether a modifier list contains the exact modifier token text.
@@ -26,458 +27,179 @@ public func attributeNameMatches(_ attribute: AttributeSyntax, expected: String)
 
 /// Matches normalized type syntax against an exact or module-qualified name.
 public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
-    normalizedTypeText(type) == expectedTypeName
-        || qualifiedTypeMatches(type, expected: expectedTypeName)
-}
-
-private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool {
-    let trimmedExpected = trimmedWhitespace(expected[...])
-    guard !trimmedExpected.isEmpty else {
+    guard let expectedType = parseExpectedType(expectedTypeName) else {
         return false
     }
 
-    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(trimmedExpected)
-    if expectedHadParentheses {
-        return typeMatches(type, expectedTypeName: unwrappedExpected)
+    return typeSyntaxMatches(type, expectedType, allowExistentialUnwrap: true)
+}
+
+private func parseExpectedType(_ text: String) -> TypeSyntax? {
+    guard text.contains(where: { !$0.isWhitespace }) else {
+        return nil
     }
 
-    if !trimmedExpected.hasSuffix("?"),
-       !trimmedExpected.hasSuffix("!"),
-       let constraintExpected = strippingLeadingAnyKeyword(from: trimmedExpected) {
-        let (unwrappedConstraint, _) = stripBalancedOuterParentheses(constraintExpected)
-        guard strippingLeadingAnyKeyword(from: unwrappedConstraint) == nil else {
+    var parser = Parser(text)
+    let parsed = TypeSyntax.parse(from: &parser)
+    guard !parsed.hasError, parsed.totalLength.utf8Length == text.utf8.count else {
+        return nil
+    }
+
+    return parsed
+}
+
+private func typeSyntaxMatches(
+    _ actual: TypeSyntax,
+    _ expected: TypeSyntax,
+    allowExistentialUnwrap: Bool
+) -> Bool {
+    let lhs = unwrapGrouping(actual)
+    let rhs = unwrapGrouping(expected)
+
+    if allowExistentialUnwrap {
+        if let lhsExistential = existentialConstraint(of: lhs) {
+            guard isValidExistentialConstraint(lhsExistential) else {
+                return false
+            }
+            return typeSyntaxMatches(lhsExistential, rhs, allowExistentialUnwrap: true)
+        }
+        if let rhsExistential = existentialConstraint(of: rhs) {
+            guard isValidExistentialConstraint(rhsExistential) else {
+                return false
+            }
+            return typeSyntaxMatches(lhs, rhsExistential, allowExistentialUnwrap: true)
+        }
+    } else {
+        let lhsExistential = existentialConstraint(of: lhs)
+        let rhsExistential = existentialConstraint(of: rhs)
+        if lhsExistential != nil || rhsExistential != nil {
+            guard let lhsConstraint = lhsExistential,
+                  let rhsConstraint = rhsExistential,
+                  isValidExistentialConstraint(lhsConstraint),
+                  isValidExistentialConstraint(rhsConstraint)
+            else {
+                return false
+            }
+            return typeSyntaxMatches(lhsConstraint, rhsConstraint, allowExistentialUnwrap: false)
+        }
+    }
+
+    let lhsOptional = standardOptionalWrappedType(lhs)
+    let rhsOptional = standardOptionalWrappedType(rhs)
+    if lhsOptional != nil || rhsOptional != nil {
+        guard let lhsWrapped = lhsOptional, let rhsWrapped = rhsOptional else {
             return false
         }
-        return typeMatches(type, expectedTypeName: constraintExpected)
+        return typeSyntaxMatches(lhsWrapped, rhsWrapped, allowExistentialUnwrap: true)
     }
 
-    if let optionalType = type.as(OptionalTypeSyntax.self) {
-        return qualifiedOptionalMatches(
-            wrappedType: optionalType.wrappedType,
-            expected: trimmedExpected
-        )
-    }
-
-    if let wrappedType = optionalWrappedType(type) {
-        return qualifiedOptionalMatches(wrappedType: wrappedType, expected: trimmedExpected)
-    }
-
-    if let iuoType = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
-        return qualifiedImplicitlyUnwrappedOptionalMatches(
-            wrappedType: iuoType.wrappedType,
-            expected: trimmedExpected
-        )
-    }
-
-    if let tupleType = type.as(TupleTypeSyntax.self),
-       tupleType.elements.count == 1,
-       let element = tupleType.elements.first,
-       element.firstName == nil {
-        return qualifiedTypeMatches(element.type, expected: trimmedExpected)
-    }
-
-    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
-       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        return qualifiedTypeMatches(someOrAnyType.constraint, expected: trimmedExpected)
-    }
-
-    if let composition = type.as(CompositionTypeSyntax.self) {
-        return qualifiedCompositionMatches(composition, expected: trimmedExpected)
-    }
-
-    if let arrayType = type.as(ArrayTypeSyntax.self) {
-        return qualifiedArrayMatches(arrayType, expected: trimmedExpected)
-    }
-
-    if let dictionaryType = type.as(DictionaryTypeSyntax.self) {
-        return qualifiedDictionaryMatches(dictionaryType, expected: trimmedExpected)
-    }
-
-    if let inlineArrayType = type.as(InlineArrayTypeSyntax.self) {
-        return qualifiedInlineArrayMatches(inlineArrayType, expected: trimmedExpected)
-    }
-
-    if let metatype = type.as(MetatypeTypeSyntax.self) {
-        return qualifiedMetatypeMatches(metatype, expected: trimmedExpected)
-    }
-
-    return qualifiedNominalMatches(type, expected: trimmedExpected)
-}
-
-private func qualifiedArrayMatches(_ arrayType: ArrayTypeSyntax, expected: String) -> Bool {
-    guard let inner = stripBalancedOuterBrackets(expected),
-          let colonParts = splitTopLevel(inner, separator: ":"),
-          colonParts.count == 1
-    else {
-        return false
-    }
-
-    return typeMatches(arrayType.element, expectedTypeName: inner)
-}
-
-private func qualifiedDictionaryMatches(
-    _ dictionaryType: DictionaryTypeSyntax,
-    expected: String
-) -> Bool {
-    guard let inner = stripBalancedOuterBrackets(expected),
-          let parts = splitTopLevel(inner, separator: ":"),
-          parts.count == 2
-    else {
-        return false
-    }
-
-    return typeMatches(dictionaryType.key, expectedTypeName: parts[0])
-        && typeMatches(dictionaryType.value, expectedTypeName: parts[1])
-}
-
-private func qualifiedInlineArrayMatches(
-    _ inlineArrayType: InlineArrayTypeSyntax,
-    expected: String
-) -> Bool {
-    guard let inner = stripBalancedOuterBrackets(expected),
-          let (expectedCount, expectedElement) = splitInlineArrayExpected(inner)
-    else {
-        return false
-    }
-
-    return genericArgumentMatches(inlineArrayType.count.argument, expected: expectedCount)
-        && genericArgumentMatches(inlineArrayType.element.argument, expected: expectedElement)
-}
-
-private func splitInlineArrayExpected(_ text: String) -> (count: String, element: String)? {
-    var parenDepth = 0
-    var angleDepth = 0
-    var bracketDepth = 0
-    var index = text.startIndex
-    var splitRange: Range<String.Index>?
-
-    while index < text.endIndex {
-        let character = text[index]
-        let nextIndex = text.index(after: index)
-
-        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
-            index = text.index(after: nextIndex)
-            continue
-        }
-
-        switch character {
-        case "(":
-            parenDepth += 1
-        case ")":
-            parenDepth -= 1
-            if parenDepth < 0 { return nil }
-        case "<":
-            angleDepth += 1
-        case ">":
-            angleDepth -= 1
-            if angleDepth < 0 { return nil }
-        case "[":
-            bracketDepth += 1
-        case "]":
-            bracketDepth -= 1
-            if bracketDepth < 0 { return nil }
-        case "o" where parenDepth == 0 && angleDepth == 0 && bracketDepth == 0:
-            if nextIndex < text.endIndex,
-               text[nextIndex] == "f",
-               index > text.startIndex,
-               text[text.index(before: index)].isWhitespace {
-                let afterOf = text.index(after: nextIndex)
-                if afterOf < text.endIndex, text[afterOf].isWhitespace {
-                    if splitRange != nil {
-                        return nil
-                    }
-                    splitRange = index..<afterOf
-                    index = afterOf
-                    continue
-                }
-            }
-        default:
-            break
-        }
-
-        index = nextIndex
-    }
-
-    guard parenDepth == 0,
-          angleDepth == 0,
-          bracketDepth == 0,
-          let splitRange
-    else {
-        return nil
-    }
-
-    let count = trimmedWhitespace(text[..<splitRange.lowerBound])
-    let element = trimmedWhitespace(text[splitRange.upperBound...])
-    guard !count.isEmpty, !element.isEmpty else {
-        return nil
-    }
-
-    return (count, element)
-}
-
-private func genericArgumentMatches(
-    _ argument: GenericArgumentSyntax.Argument,
-    expected: String
-) -> Bool {
-    switch argument {
-    case .type(let argumentType):
-        typeMatches(argumentType, expectedTypeName: expected)
-    case .expr(let argumentExpr):
-        normalizedTokenText(argumentExpr) == expected
-    }
-}
-
-private func stripBalancedOuterBrackets(_ text: String) -> String? {
-    guard text.first == "[", text.last == "]" else {
-        return nil
-    }
-
-    var parenDepth = 0
-    var angleDepth = 0
-    var bracketDepth = 0
-    var index = text.startIndex
-    let lastIndex = text.index(before: text.endIndex)
-
-    while index < text.endIndex {
-        let character = text[index]
-        let nextIndex = text.index(after: index)
-
-        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
-            index = text.index(after: nextIndex)
-            continue
-        }
-
-        switch character {
-        case "[":
-            bracketDepth += 1
-        case "]":
-            bracketDepth -= 1
-            if bracketDepth < 0 { return nil }
-            if bracketDepth == 0 && index != lastIndex {
-                return nil
-            }
-        case "(":
-            parenDepth += 1
-        case ")":
-            parenDepth -= 1
-            if parenDepth < 0 { return nil }
-        case "<":
-            angleDepth += 1
-        case ">":
-            angleDepth -= 1
-            if angleDepth < 0 { return nil }
-        default:
-            break
-        }
-
-        index = nextIndex
-    }
-
-    guard parenDepth == 0, angleDepth == 0, bracketDepth == 0 else {
-        return nil
-    }
-
-    let innerStart = text.index(after: text.startIndex)
-    let inner = trimmedWhitespace(text[innerStart..<lastIndex])
-    return inner.isEmpty ? nil : inner
-}
-
-private func qualifiedOptionalMatches(
-    wrappedType: TypeSyntax,
-    expected: String
-) -> Bool {
-    guard let (rawExpectedWrapped, isSugar) = expectedOptionalWrapped(expected) else {
-        return false
-    }
-
-    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(rawExpectedWrapped)
-    if isSugar,
-       !expectedHadParentheses,
-       !isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
-        || strippingLeadingAnyKeyword(from: unwrappedExpected) != nil {
-        return false
-    }
-
-    return typeMatches(wrappedType, expectedTypeName: unwrappedExpected)
-}
-
-private func standardOptionalWrappedArgument(from segments: [ExpectedNominalSegment]) -> String? {
-    let genericBody: String?
-    switch segments.count {
-    case 1 where segments[0].name == "Optional":
-        genericBody = segments[0].genericBody
-    case 2 where segments[0].name == "Swift"
-        && segments[0].genericBody == nil
-        && segments[1].name == "Optional":
-        genericBody = segments[1].genericBody
-    default:
-        return nil
-    }
-
-    return standardOptionalTypeArgument(from: genericBody)
-}
-
-private func standardOptionalTypeArgument(from genericBody: String?) -> String? {
-    guard let genericBody,
-          let arguments = splitTopLevel(genericBody, separator: ","),
-          arguments.count == 1,
-          let wrapped = arguments.first,
-          !isValueGenericLiteral(wrapped)
-    else {
-        return nil
-    }
-
-    return wrapped
-}
-
-private func isValueGenericLiteral(_ text: String) -> Bool {
-    guard let first = text.first else {
-        return false
-    }
-    if first.isASCII && first.isNumber {
-        return true
-    }
-    if first == "-" {
-        let rest = text.dropFirst()
-        return rest.first.map { $0.isASCII && $0.isNumber } ?? false
-    }
-    return false
-}
-
-private func expectedOptionalWrapped(_ expected: String) -> (wrapped: String, isSugar: Bool)? {
-    if expected.hasSuffix("?") {
-        let wrapped = String(expected.dropLast())
-        return wrapped.isEmpty ? nil : (wrapped, true)
-    }
-
-    guard let segments = parseExpectedNominalSegments(expected),
-          let wrapped = standardOptionalWrappedArgument(from: segments)
-    else {
-        return nil
-    }
-
-    return (wrapped, false)
-}
-
-private func qualifiedImplicitlyUnwrappedOptionalMatches(
-    wrappedType: TypeSyntax,
-    expected: String
-) -> Bool {
-    guard expected.hasSuffix("!") else {
-        return false
-    }
-
-    let rawExpectedWrapped = String(expected.dropLast())
-    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(rawExpectedWrapped)
-    if !expectedHadParentheses,
-       !isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
-        || strippingLeadingAnyKeyword(from: unwrappedExpected) != nil {
-        return false
-    }
-
-    return typeMatches(wrappedType, expectedTypeName: unwrappedExpected)
-}
-
-private func qualifiedCompositionMatches(
-    _ composition: CompositionTypeSyntax,
-    expected: String
-) -> Bool {
-    guard let expectedElements = splitTopLevel(expected, separator: "&"),
-          composition.elements.count == expectedElements.count
-    else {
-        return false
-    }
-
-    for (astElement, expectedElement) in zip(composition.elements, expectedElements) {
-        guard typeMatches(astElement.type, expectedTypeName: expectedElement) else {
+    let lhsIUO = lhs.as(ImplicitlyUnwrappedOptionalTypeSyntax.self)
+    let rhsIUO = rhs.as(ImplicitlyUnwrappedOptionalTypeSyntax.self)
+    if lhsIUO != nil || rhsIUO != nil {
+        guard let lhsIUO, let rhsIUO else {
             return false
         }
+        return typeSyntaxMatches(lhsIUO.wrappedType, rhsIUO.wrappedType, allowExistentialUnwrap: true)
     }
 
-    return true
-}
-
-private func qualifiedMetatypeMatches(
-    _ metatype: MetatypeTypeSyntax,
-    expected: String
-) -> Bool {
-    let suffix = ".\(metatype.metatypeSpecifier.text)"
-    guard expected.hasSuffix(suffix) else {
-        return false
-    }
-    let remainingExpected = String(expected.dropLast(suffix.count))
-    return qualifiedMetatypeBaseMatches(metatype.baseType, expected: remainingExpected)
-}
-
-private func qualifiedMetatypeBaseMatches(_ base: TypeSyntax, expected: String) -> Bool {
-    let unwrappedBase = unwrapGrouping(base)
-    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(expected)
-
-    if let someOrAnyType = unwrappedBase.as(SomeOrAnyTypeSyntax.self),
-       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        guard expectedHadParentheses,
-              let constraintExpected = strippingLeadingAnyKeyword(from: unwrappedExpected)
+    let lhsMetatype = lhs.as(MetatypeTypeSyntax.self)
+    let rhsMetatype = rhs.as(MetatypeTypeSyntax.self)
+    if lhsMetatype != nil || rhsMetatype != nil {
+        guard let lhsMetatype,
+              let rhsMetatype,
+              lhsMetatype.metatypeSpecifier.text == rhsMetatype.metatypeSpecifier.text
         else {
             return false
         }
-        let (innerExpected, _) = stripBalancedOuterParentheses(constraintExpected)
-        guard strippingLeadingAnyKeyword(from: innerExpected) == nil else {
-            return false
-        }
-        let unwrappedConstraint = unwrapGrouping(someOrAnyType.constraint)
-        if let composition = unwrappedConstraint.as(CompositionTypeSyntax.self) {
-            return qualifiedCompositionMatches(composition, expected: innerExpected)
-        }
-        return qualifiedMetatypeBaseMatches(someOrAnyType.constraint, expected: constraintExpected)
-    }
-
-    if (expectedHadParentheses || isPostfixAtomic(unwrappedBase)),
-       normalizedTypeText(unwrappedBase) == unwrappedExpected {
-        return true
-    }
-
-    if let nestedMetatype = unwrappedBase.as(MetatypeTypeSyntax.self) {
-        return qualifiedMetatypeMatches(nestedMetatype, expected: unwrappedExpected)
-    }
-
-    if let composition = unwrappedBase.as(CompositionTypeSyntax.self) {
-        guard expectedHadParentheses else {
-            return false
-        }
-        return qualifiedCompositionMatches(composition, expected: unwrappedExpected)
-    }
-
-    if let optionalType = unwrappedBase.as(OptionalTypeSyntax.self) {
-        return qualifiedOptionalMatches(
-            wrappedType: optionalType.wrappedType,
-            expected: unwrappedExpected
+        return typeSyntaxMatches(
+            lhsMetatype.baseType,
+            rhsMetatype.baseType,
+            allowExistentialUnwrap: false
         )
     }
 
-    if let wrappedType = optionalWrappedType(unwrappedBase) {
-        return qualifiedOptionalMatches(wrappedType: wrappedType, expected: unwrappedExpected)
+    let lhsComposition = lhs.as(CompositionTypeSyntax.self)
+    let rhsComposition = rhs.as(CompositionTypeSyntax.self)
+    if lhsComposition != nil || rhsComposition != nil {
+        guard let lhsComposition,
+              let rhsComposition,
+              lhsComposition.elements.count == rhsComposition.elements.count
+        else {
+            return false
+        }
+        return zip(lhsComposition.elements, rhsComposition.elements).allSatisfy { lElement, rElement in
+            typeSyntaxMatches(
+                lElement.type,
+                rElement.type,
+                allowExistentialUnwrap: allowExistentialUnwrap
+            )
+        }
     }
 
-    if let iuoType = unwrappedBase.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
-        return qualifiedImplicitlyUnwrappedOptionalMatches(
-            wrappedType: iuoType.wrappedType,
-            expected: unwrappedExpected
+    let lhsArray = lhs.as(ArrayTypeSyntax.self)
+    let rhsArray = rhs.as(ArrayTypeSyntax.self)
+    if lhsArray != nil || rhsArray != nil {
+        guard let lhsArray, let rhsArray else {
+            return false
+        }
+        return typeSyntaxMatches(lhsArray.element, rhsArray.element, allowExistentialUnwrap: true)
+    }
+
+    let lhsDictionary = lhs.as(DictionaryTypeSyntax.self)
+    let rhsDictionary = rhs.as(DictionaryTypeSyntax.self)
+    if lhsDictionary != nil || rhsDictionary != nil {
+        guard let lhsDictionary, let rhsDictionary else {
+            return false
+        }
+        return typeSyntaxMatches(lhsDictionary.key, rhsDictionary.key, allowExistentialUnwrap: true)
+            && typeSyntaxMatches(lhsDictionary.value, rhsDictionary.value, allowExistentialUnwrap: true)
+    }
+
+    let lhsInlineArray = lhs.as(InlineArrayTypeSyntax.self)
+    let rhsInlineArray = rhs.as(InlineArrayTypeSyntax.self)
+    if lhsInlineArray != nil || rhsInlineArray != nil {
+        guard let lhsInlineArray, let rhsInlineArray else {
+            return false
+        }
+        return genericArgumentMatches(lhsInlineArray.count.argument, rhsInlineArray.count.argument)
+            && genericArgumentMatches(lhsInlineArray.element.argument, rhsInlineArray.element.argument)
+    }
+
+    let lhsTuple = lhs.as(TupleTypeSyntax.self)
+    let rhsTuple = rhs.as(TupleTypeSyntax.self)
+    if lhsTuple != nil || rhsTuple != nil {
+        guard let lhsTuple,
+              let rhsTuple,
+              lhsTuple.elements.count == rhsTuple.elements.count
+        else {
+            return false
+        }
+        return zip(lhsTuple.elements, rhsTuple.elements).allSatisfy { lElement, rElement in
+            lElement.firstName?.text == rElement.firstName?.text
+                && lElement.secondName?.text == rElement.secondName?.text
+                && typeSyntaxMatches(lElement.type, rElement.type, allowExistentialUnwrap: true)
+        }
+    }
+
+    let lhsSuppressed = lhs.as(SuppressedTypeSyntax.self)
+    let rhsSuppressed = rhs.as(SuppressedTypeSyntax.self)
+    if lhsSuppressed != nil || rhsSuppressed != nil {
+        guard let lhsSuppressed, let rhsSuppressed else {
+            return false
+        }
+        return typeSyntaxMatches(
+            lhsSuppressed.type,
+            rhsSuppressed.type,
+            allowExistentialUnwrap: false
         )
     }
 
-    if let arrayType = unwrappedBase.as(ArrayTypeSyntax.self) {
-        return qualifiedArrayMatches(arrayType, expected: unwrappedExpected)
+    if let lhsSegments = nominalASTSegments(for: lhs),
+       let rhsSegments = nominalASTSegments(for: rhs) {
+        return nominalSegmentsMatch(lhsSegments, rhsSegments)
     }
 
-    if let dictionaryType = unwrappedBase.as(DictionaryTypeSyntax.self) {
-        return qualifiedDictionaryMatches(dictionaryType, expected: unwrappedExpected)
-    }
-
-    if let inlineArrayType = unwrappedBase.as(InlineArrayTypeSyntax.self) {
-        return qualifiedInlineArrayMatches(inlineArrayType, expected: unwrappedExpected)
-    }
-
-    return qualifiedNominalMatches(unwrappedBase, expected: unwrappedExpected)
+    return normalizedTokenText(lhs) == normalizedTokenText(rhs)
 }
 
 private func unwrapGrouping(_ type: TypeSyntax) -> TypeSyntax {
@@ -491,348 +213,45 @@ private func unwrapGrouping(_ type: TypeSyntax) -> TypeSyntax {
     return type
 }
 
-private func strippingLeadingAnyKeyword(from text: String) -> String? {
-    guard text.hasPrefix("any") else {
-        return nil
-    }
-    let afterAny = text.dropFirst(3)
-    guard let firstAfterAny = afterAny.first, firstAfterAny.isWhitespace else {
-        return nil
-    }
-    let remainder = trimmedWhitespace(afterAny)
-    return remainder.isEmpty ? nil : remainder
-}
-
-private func stripBalancedOuterParentheses(_ text: String) -> (inner: String, hadParentheses: Bool) {
-    var current = trimmedWhitespace(text[...])
-    var strippedAny = false
-
-    while let inner = stripOneBalancedOuterParentheses(current) {
-        current = inner
-        strippedAny = true
-    }
-
-    return (current, strippedAny)
-}
-
-private func stripOneBalancedOuterParentheses(_ text: String) -> String? {
-    guard text.first == "(", text.last == ")" else {
-        return nil
-    }
-
-    var parenDepth = 0
-    var angleDepth = 0
-    var bracketDepth = 0
-    var index = text.startIndex
-    let lastIndex = text.index(before: text.endIndex)
-
-    while index < text.endIndex {
-        let character = text[index]
-        let nextIndex = text.index(after: index)
-
-        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
-            index = text.index(after: nextIndex)
-            continue
-        }
-
-        switch character {
-        case "(":
-            parenDepth += 1
-        case ")":
-            parenDepth -= 1
-            if parenDepth < 0 { return nil }
-            if parenDepth == 0 && index != lastIndex {
-                return nil
-            }
-        case "<":
-            angleDepth += 1
-        case ">":
-            angleDepth -= 1
-            if angleDepth < 0 { return nil }
-        case "[":
-            bracketDepth += 1
-        case "]":
-            bracketDepth -= 1
-            if bracketDepth < 0 { return nil }
-        case "," where parenDepth == 1 && angleDepth == 0 && bracketDepth == 0:
-            return nil
-        default:
-            break
-        }
-
-        index = nextIndex
-    }
-
-    guard parenDepth == 0, angleDepth == 0, bracketDepth == 0 else {
-        return nil
-    }
-
-    let innerStart = text.index(after: text.startIndex)
-    let inner = trimmedWhitespace(text[innerStart..<lastIndex])
-    return inner.isEmpty ? nil : inner
-}
-
-private struct NominalASTSegment {
-    let name: String
-    let genericClause: GenericArgumentClauseSyntax?
-}
-
-private struct ExpectedNominalSegment {
-    let name: String
-    let genericBody: String?
-}
-
-private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bool {
-    guard !expected.isEmpty,
-          let astSegments = nominalASTSegments(for: type),
-          let expectedSegments = parseExpectedNominalSegments(expected),
-          expectedSegments.count <= astSegments.count
+private func existentialConstraint(of type: TypeSyntax) -> TypeSyntax? {
+    guard let someOrAny = type.as(SomeOrAnyTypeSyntax.self),
+          someOrAny.someOrAnySpecifier.tokenKind == .keyword(.any)
     else {
-        return false
-    }
-
-    let droppedPrefixCount = astSegments.count - expectedSegments.count
-    let droppedPrefix = astSegments.prefix(droppedPrefixCount)
-    guard droppedPrefix.allSatisfy({ $0.genericClause == nil }) else {
-        return false
-    }
-
-    if !allowsDroppedPrefix(droppedPrefix, forExpectedSegments: expectedSegments) {
-        return false
-    }
-
-    for (astSegment, expectedSegment) in zip(astSegments.suffix(expectedSegments.count), expectedSegments) {
-        guard astSegment.name == expectedSegment.name else {
-            return false
-        }
-        switch (astSegment.genericClause, expectedSegment.genericBody) {
-        case (nil, nil):
-            continue
-        case (let clause?, let expectedBody?):
-            if normalizedTokenText(clause) == "<\(expectedBody)>" {
-                continue
-            }
-            guard let expectedArguments = splitTopLevel(expectedBody, separator: ","),
-                  clause.arguments.count == expectedArguments.count
-            else {
-                return false
-            }
-            for (astArgument, expectedArgument) in zip(clause.arguments, expectedArguments) {
-                guard genericArgumentMatches(astArgument.argument, expected: expectedArgument) else {
-                    return false
-                }
-            }
-        default:
-            return false
-        }
-    }
-
-    return true
-}
-
-private func allowsDroppedPrefix(
-    _ droppedPrefix: ArraySlice<NominalASTSegment>,
-    forExpectedSegments expectedSegments: [ExpectedNominalSegment]
-) -> Bool {
-    guard !droppedPrefix.isEmpty else {
-        return true
-    }
-
-    if expectedSegments.count >= 2,
-       expectedSegments[0].name == "Swift",
-       expectedSegments[0].genericBody == nil,
-       expectedSegments[1].name == "Optional",
-       standardOptionalTypeArgument(from: expectedSegments[1].genericBody) != nil {
-        return false
-    }
-
-    if expectedSegments[0].name == "Optional",
-       standardOptionalTypeArgument(from: expectedSegments[0].genericBody) != nil {
-        return droppedPrefix.count == 1
-            && droppedPrefix.first?.name == "Swift"
-            && droppedPrefix.first?.genericClause == nil
-    }
-
-    return true
-}
-
-private func nominalASTSegments(for type: TypeSyntax) -> [NominalASTSegment]? {
-    if let identifierType = type.as(IdentifierTypeSyntax.self) {
-        return [
-            NominalASTSegment(
-                name: identifierType.name.text,
-                genericClause: identifierType.genericArgumentClause
-            )
-        ]
-    }
-    if let memberType = type.as(MemberTypeSyntax.self),
-       let baseSegments = nominalASTSegments(for: memberType.baseType) {
-        return baseSegments + [
-            NominalASTSegment(
-                name: memberType.name.text,
-                genericClause: memberType.genericArgumentClause
-            )
-        ]
-    }
-    return nil
-}
-
-private func parseExpectedNominalSegments(_ expected: String) -> [ExpectedNominalSegment]? {
-    guard let rawSegments = splitTopLevel(expected, separator: ".") else {
         return nil
     }
 
-    var parsed: [ExpectedNominalSegment] = []
-    parsed.reserveCapacity(rawSegments.count)
-
-    for segment in rawSegments {
-        if let openAngle = segment.firstIndex(of: "<") {
-            let name = String(segment[..<openAngle])
-            guard !name.isEmpty,
-                  !name.contains(">"),
-                  !name.contains(where: \.isWhitespace),
-                  segment.last == ">"
-            else {
-                return nil
-            }
-            let bodyStart = segment.index(after: openAngle)
-            let bodyEnd = segment.index(before: segment.endIndex)
-            guard bodyStart < bodyEnd else {
-                return nil
-            }
-            let body = String(segment[bodyStart..<bodyEnd])
-            guard hasBalancedDelimiters(body) else {
-                return nil
-            }
-            parsed.append(ExpectedNominalSegment(name: name, genericBody: body))
-        } else {
-            guard !segment.isEmpty,
-                  !segment.contains(">"),
-                  !segment.contains(where: \.isWhitespace)
-            else {
-                return nil
-            }
-            parsed.append(ExpectedNominalSegment(name: segment, genericBody: nil))
-        }
-    }
-
-    return parsed
+    return someOrAny.constraint
 }
 
-private func splitTopLevel(_ text: String, separator: Character) -> [String]? {
-    var parts: [String] = []
-    var currentStart = text.startIndex
-    var angleDepth = 0
-    var parenDepth = 0
-    var bracketDepth = 0
-    var index = text.startIndex
-
-    while index < text.endIndex {
-        let character = text[index]
-        let nextIndex = text.index(after: index)
-
-        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
-            index = text.index(after: nextIndex)
-            continue
+private func isValidExistentialConstraint(_ constraint: TypeSyntax) -> Bool {
+    let unwrapped = unwrapGrouping(constraint)
+    if unwrapped.is(IdentifierTypeSyntax.self) || unwrapped.is(MemberTypeSyntax.self) {
+        return optionalWrappedType(unwrapped) == nil
+    }
+    if let metatype = unwrapped.as(MetatypeTypeSyntax.self) {
+        return isValidExistentialConstraint(metatype.baseType)
+    }
+    if let composition = unwrapped.as(CompositionTypeSyntax.self) {
+        return composition.elements.allSatisfy { element in
+            unwrapGrouping(element.type).is(SuppressedTypeSyntax.self)
+                || isValidExistentialConstraint(element.type)
         }
-
-        switch character {
-        case "<":
-            angleDepth += 1
-        case ">":
-            angleDepth -= 1
-            if angleDepth < 0 { return nil }
-        case "(":
-            parenDepth += 1
-        case ")":
-            parenDepth -= 1
-            if parenDepth < 0 { return nil }
-        case "[":
-            bracketDepth += 1
-        case "]":
-            bracketDepth -= 1
-            if bracketDepth < 0 { return nil }
-        case separator where angleDepth == 0 && parenDepth == 0 && bracketDepth == 0:
-            let piece = trimmedWhitespace(text[currentStart..<index])
-            guard !piece.isEmpty else { return nil }
-            parts.append(piece)
-            currentStart = nextIndex
-        default:
-            break
-        }
-
-        index = nextIndex
     }
 
-    guard angleDepth == 0, parenDepth == 0, bracketDepth == 0 else {
-        return nil
-    }
-
-    let trailing = trimmedWhitespace(text[currentStart..<text.endIndex])
-    guard !trailing.isEmpty else {
-        return nil
-    }
-    parts.append(trailing)
-    return parts
+    return false
 }
 
-private func trimmedWhitespace(_ substring: Substring) -> String {
-    var start = substring.startIndex
-    var end = substring.endIndex
-    while start < end, substring[start].isWhitespace {
-        start = substring.index(after: start)
-    }
-    while end > start {
-        let beforeEnd = substring.index(before: end)
-        guard substring[beforeEnd].isWhitespace else { break }
-        end = beforeEnd
-    }
-    return String(substring[start..<end])
-}
-
-private func hasBalancedDelimiters(_ text: String) -> Bool {
-    var angleDepth = 0
-    var parenDepth = 0
-    var bracketDepth = 0
-    var index = text.startIndex
-
-    while index < text.endIndex {
-        let character = text[index]
-        let nextIndex = text.index(after: index)
-
-        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
-            index = text.index(after: nextIndex)
-            continue
-        }
-
-        switch character {
-        case "<":
-            angleDepth += 1
-        case ">":
-            angleDepth -= 1
-            if angleDepth < 0 { return false }
-        case "(":
-            parenDepth += 1
-        case ")":
-            parenDepth -= 1
-            if parenDepth < 0 { return false }
-        case "[":
-            bracketDepth += 1
-        case "]":
-            bracketDepth -= 1
-            if bracketDepth < 0 { return false }
-        default:
-            break
-        }
-
-        index = nextIndex
+private func standardOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
+    if let optionalType = type.as(OptionalTypeSyntax.self) {
+        return optionalType.wrappedType
     }
 
-    return angleDepth == 0 && parenDepth == 0 && bracketDepth == 0
+    return optionalWrappedType(type)
 }
 
 private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
     if let identifierType = type.as(IdentifierTypeSyntax.self),
+       identifierType.moduleSelector == nil,
        identifierType.name.text == "Optional",
        let arguments = identifierType.genericArgumentClause?.arguments,
        arguments.count == 1,
@@ -842,8 +261,10 @@ private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
     }
 
     guard let memberType = type.as(MemberTypeSyntax.self),
+          memberType.moduleSelector == nil,
           memberType.name.text == "Optional",
           let baseIdentifier = memberType.baseType.as(IdentifierTypeSyntax.self),
+          baseIdentifier.moduleSelector == nil,
           baseIdentifier.name.text == "Swift",
           baseIdentifier.genericArgumentClause == nil,
           let arguments = memberType.genericArgumentClause?.arguments,
@@ -857,70 +278,129 @@ private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
     return wrappedType
 }
 
-/// Renders a type in the canonical spelling used by expected-type tables:
-/// optionals as `?`, `any` markers dropped, single-element parentheses
-/// unwrapped when precedence allows, non-boundary whitespace removed. Adjacent
-/// word tokens keep a separating space so opaque and ownership keywords remain
-/// distinct.
-private func normalizedTypeText(_ type: TypeSyntax) -> String {
-    if let optionalType = type.as(OptionalTypeSyntax.self) {
-        return normalizedPostfixBaseText(optionalType.wrappedType) + "?"
+private struct NominalASTSegment {
+    let moduleSelector: String?
+    let name: String
+    let genericClause: GenericArgumentClauseSyntax?
+
+    var isUnqualifiedStandardOptional: Bool {
+        guard moduleSelector == nil,
+              name == "Optional",
+              let arguments = genericClause?.arguments,
+              arguments.count == 1,
+              let argument = arguments.first,
+              case .type = argument.argument
+        else {
+            return false
+        }
+
+        return true
     }
 
-    if let wrappedType = optionalWrappedType(type) {
-        return normalizedPostfixBaseText(wrappedType) + "?"
+    var isPlainSwiftNamespace: Bool {
+        moduleSelector == nil && name == "Swift" && genericClause == nil
     }
-
-    if let iuoType = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
-        return normalizedPostfixBaseText(iuoType.wrappedType) + "!"
-    }
-
-    if let tupleType = type.as(TupleTypeSyntax.self),
-       tupleType.elements.count == 1,
-       let element = tupleType.elements.first,
-       element.firstName == nil {
-        return normalizedTypeText(element.type)
-    }
-
-    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
-       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        return normalizedTypeText(someOrAnyType.constraint)
-    }
-
-    return normalizedTokenText(type)
 }
 
-private func normalizedPostfixBaseText(_ base: TypeSyntax) -> String {
-    let rendered = normalizedTypeText(base)
-    return isPostfixAtomic(unwrapGroupingAndAny(base)) ? rendered : "(\(rendered))"
+private func nominalASTSegments(for type: TypeSyntax) -> [NominalASTSegment]? {
+    if let identifierType = type.as(IdentifierTypeSyntax.self) {
+        return [
+            NominalASTSegment(
+                moduleSelector: identifierType.moduleSelector?.moduleName.text,
+                name: identifierType.name.text,
+                genericClause: identifierType.genericArgumentClause
+            )
+        ]
+    }
+    if let memberType = type.as(MemberTypeSyntax.self),
+       let baseSegments = nominalASTSegments(for: memberType.baseType) {
+        return baseSegments + [
+            NominalASTSegment(
+                moduleSelector: memberType.moduleSelector?.moduleName.text,
+                name: memberType.name.text,
+                genericClause: memberType.genericArgumentClause
+            )
+        ]
+    }
+    return nil
 }
 
-private func unwrapGroupingAndAny(_ type: TypeSyntax) -> TypeSyntax {
-    if let tupleType = type.as(TupleTypeSyntax.self),
-       tupleType.elements.count == 1,
-       let element = tupleType.elements.first,
-       element.firstName == nil {
-        return unwrapGroupingAndAny(element.type)
+private func nominalSegmentsMatch(
+    _ lhsSegments: [NominalASTSegment],
+    _ rhsSegments: [NominalASTSegment]
+) -> Bool {
+    var expected = rhsSegments[...]
+    if expected.count >= 2,
+       expected[expected.startIndex].isPlainSwiftNamespace,
+       expected[expected.index(after: expected.startIndex)].isUnqualifiedStandardOptional,
+       let firstActual = lhsSegments.first,
+       firstActual.isUnqualifiedStandardOptional {
+        expected = expected.dropFirst()
     }
 
-    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
-       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        return unwrapGroupingAndAny(someOrAnyType.constraint)
+    guard expected.count <= lhsSegments.count else {
+        return false
     }
 
-    return type
+    let droppedPrefixCount = lhsSegments.count - expected.count
+    let droppedPrefix = lhsSegments.prefix(droppedPrefixCount)
+    guard droppedPrefix.allSatisfy({ $0.genericClause == nil && $0.moduleSelector == nil }) else {
+        return false
+    }
+
+    if !droppedPrefix.isEmpty {
+        if expected.count >= 2,
+           expected[expected.startIndex].isPlainSwiftNamespace,
+           expected[expected.index(after: expected.startIndex)].isUnqualifiedStandardOptional {
+            return false
+        }
+        if expected[expected.startIndex].isUnqualifiedStandardOptional {
+            guard droppedPrefix.count == 1,
+                  droppedPrefix.first?.isPlainSwiftNamespace == true
+            else {
+                return false
+            }
+        }
+    }
+
+    for (lhsSegment, rhsSegment) in zip(lhsSegments.suffix(expected.count), expected) {
+        guard lhsSegment.moduleSelector == rhsSegment.moduleSelector,
+              lhsSegment.name == rhsSegment.name
+        else {
+            return false
+        }
+        switch (lhsSegment.genericClause, rhsSegment.genericClause) {
+        case (nil, nil):
+            continue
+        case (let lhsClause?, let rhsClause?):
+            guard lhsClause.arguments.count == rhsClause.arguments.count else {
+                return false
+            }
+            for (lhsArgument, rhsArgument) in zip(lhsClause.arguments, rhsClause.arguments) {
+                guard genericArgumentMatches(lhsArgument.argument, rhsArgument.argument) else {
+                    return false
+                }
+            }
+        default:
+            return false
+        }
+    }
+
+    return true
 }
 
-private func isPostfixAtomic(_ type: TypeSyntax) -> Bool {
-    type.is(IdentifierTypeSyntax.self)
-        || type.is(MemberTypeSyntax.self)
-        || type.is(ArrayTypeSyntax.self)
-        || type.is(DictionaryTypeSyntax.self)
-        || type.is(InlineArrayTypeSyntax.self)
-        || type.is(OptionalTypeSyntax.self)
-        || type.is(ImplicitlyUnwrappedOptionalTypeSyntax.self)
-        || type.is(MetatypeTypeSyntax.self)
-        || type.is(TupleTypeSyntax.self)
+private func genericArgumentMatches(
+    _ actual: GenericArgumentSyntax.Argument,
+    _ expected: GenericArgumentSyntax.Argument
+) -> Bool {
+    switch (actual, expected) {
+    case (.type(let actualType), .type(let expectedType)):
+        typeSyntaxMatches(actualType, expectedType, allowExistentialUnwrap: true)
+    case (.expr(let actualExpr), .expr(let expectedExpr)):
+        normalizedTokenText(actualExpr) == normalizedTokenText(expectedExpr)
+    default:
+        false
+    }
 }
 
 private func normalizedTokenText(_ node: some SyntaxProtocol) -> String {
