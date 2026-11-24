@@ -59,13 +59,14 @@ public struct RequireFinalMacro: PeerMacro {
         }
 
         if hasVisibleNestedSubclass(in: classDecl, context: context) {
+            let className = unescapedIdentifier(classDecl.name.text)
             context.diagnose(
                 classDecl.name,
                 domain: diagnosticDomain,
                 id: RequireFinalDiagnosticID.nestedSubclass,
                 what: "@RequireFinal requires a final class, but this class has a nested subclass.",
                 why: "Swift forbids subclassing a 'final' class.",
-                how: "Remove inheritance from '\(classDecl.name.text)' on nested subclasses and add the 'final' modifier to this class declaration."
+                how: "Remove inheritance from '\(className)' on nested subclasses and add the 'final' modifier to this class declaration."
             )
             return []
         }
@@ -116,13 +117,19 @@ private func hasVisibleNestedSubclass(
     in classDecl: ClassDeclSyntax,
     context: some MacroExpansionContext
 ) -> Bool {
-    let attachedPath = enclosingTypeComponents(
+    let attachedName = unescapedIdentifier(classDecl.name.text)
+    var candidatePaths: [[String]]
+    if let enclosing = enclosingNominalPath(
         for: classDecl,
         lexicalContext: context.lexicalContext
-    ) + [classDecl.name.text]
-    var candidatePaths = [attachedPath]
-    if let module = moduleName(for: classDecl, in: context) {
-        candidatePaths.append([module] + attachedPath)
+    ) {
+        let attachedPath = enclosing + [attachedName]
+        candidatePaths = [attachedPath]
+        if let module = moduleName(for: classDecl, in: context) {
+            candidatePaths.append([module] + attachedPath)
+        }
+    } else {
+        candidatePaths = [[attachedName]]
     }
 
     let finder = NestedSubclassFinder(
@@ -180,88 +187,69 @@ private func matchesAttachedClass(
     return !isLeadingNameShadowed(
         leadingName,
         from: childClass,
-        upTo: rootMemberBlock
+        through: rootMemberBlock
     )
 }
 
 private func isLeadingNameShadowed(
     _ name: String,
     from childClass: ClassDeclSyntax,
-    upTo rootMemberBlock: MemberBlockSyntax
+    through rootMemberBlock: MemberBlockSyntax
 ) -> Bool {
+    let childDecl = DeclSyntax(childClass)
     var current = Syntax(childClass).parent
-    while let node = current, node != Syntax(rootMemberBlock) {
-        if let memberBlock = node.as(MemberBlockSyntax.self),
-           declaresType(named: name, in: memberBlock.members) {
+
+    while let node = current {
+        if let memberList = node.as(MemberBlockItemListSyntax.self),
+           memberList.contains(where: {
+               $0.decl != childDecl && declaredTypeName(of: $0.decl) == name
+           }) {
             return true
         }
-        if let codeBlock = node.as(CodeBlockSyntax.self),
-           declaresType(named: name, in: codeBlock.statements) {
+        if let statementList = node.as(CodeBlockItemListSyntax.self),
+           statementList.contains(where: {
+               guard case .decl(let decl) = $0.item else {
+                   return false
+               }
+               return decl != childDecl && declaredTypeName(of: decl) == name
+           }) {
             return true
+        }
+        if node == Syntax(rootMemberBlock) {
+            break
         }
         current = node.parent
     }
     return false
 }
 
-private func declaresType(named name: String, in members: MemberBlockItemListSyntax) -> Bool {
-    for member in members {
-        if let ifConfig = member.decl.as(IfConfigDeclSyntax.self) {
-            for clause in ifConfig.clauses {
-                if case .decls(let conditionalMembers) = clause.elements,
-                   declaresType(named: name, in: conditionalMembers) {
-                    return true
-                }
-            }
-            continue
-        }
-        if declaredTypeName(of: member.decl) == name {
-            return true
-        }
-    }
-    return false
-}
-
-private func declaresType(named name: String, in statements: CodeBlockItemListSyntax) -> Bool {
-    for statement in statements {
-        if case .decl(let decl) = statement.item {
-            if let ifConfig = decl.as(IfConfigDeclSyntax.self) {
-                for clause in ifConfig.clauses {
-                    if case .statements(let conditionalStatements) = clause.elements,
-                       declaresType(named: name, in: conditionalStatements) {
-                        return true
-                    }
-                }
-                continue
-            }
-            if declaredTypeName(of: decl) == name {
-                return true
-            }
-        }
-    }
-    return false
-}
-
 private func declaredTypeName(of decl: DeclSyntax) -> String? {
     if let classDecl = decl.as(ClassDeclSyntax.self) {
-        return classDecl.name.text
+        return unescapedIdentifier(classDecl.name.text)
     }
     if let structDecl = decl.as(StructDeclSyntax.self) {
-        return structDecl.name.text
+        return unescapedIdentifier(structDecl.name.text)
     }
     if let enumDecl = decl.as(EnumDeclSyntax.self) {
-        return enumDecl.name.text
+        return unescapedIdentifier(enumDecl.name.text)
     }
     if let actorDecl = decl.as(ActorDeclSyntax.self) {
-        return actorDecl.name.text
+        return unescapedIdentifier(actorDecl.name.text)
     }
     if let protocolDecl = decl.as(ProtocolDeclSyntax.self) {
-        return protocolDecl.name.text
+        return unescapedIdentifier(protocolDecl.name.text)
     }
     if let typeAliasDecl = decl.as(TypeAliasDeclSyntax.self) {
-        return typeAliasDecl.name.text
+        return unescapedIdentifier(typeAliasDecl.name.text)
     }
     return nil
+}
+
+private func unescapedIdentifier(_ text: String) -> String {
+    if text.count >= 2, text.first == "`", text.last == "`" {
+        return String(text.dropFirst().dropLast())
+    }
+    return text
 }
 
 private func moduleName(
@@ -283,23 +271,39 @@ private func moduleName(
     return String(represented[..<slash])
 }
 
-private func enclosingTypeComponents(
+private func enclosingNominalPath(
     for classDecl: ClassDeclSyntax,
     lexicalContext: [Syntax]
-) -> [String] {
+) -> [String]? {
     var components: [String] = []
     if let parent = Syntax(classDecl).parent {
         var current: Syntax? = parent
         while let node = current {
+            if isLocalScopeBoundary(node) {
+                return nil
+            }
             components.insert(contentsOf: enclosingComponents(for: node), at: 0)
             current = node.parent
         }
     } else {
         for node in lexicalContext {
+            if isLocalScopeBoundary(node) {
+                return nil
+            }
             components.insert(contentsOf: enclosingComponents(for: node), at: 0)
         }
     }
     return components
+}
+
+private func isLocalScopeBoundary(_ syntax: Syntax) -> Bool {
+    syntax.is(FunctionDeclSyntax.self)
+        || syntax.is(InitializerDeclSyntax.self)
+        || syntax.is(SubscriptDeclSyntax.self)
+        || syntax.is(AccessorDeclSyntax.self)
+        || syntax.is(DeinitializerDeclSyntax.self)
+        || syntax.is(ClosureExprSyntax.self)
+        || syntax.is(CodeBlockSyntax.self)
 }
 
 private func enclosingComponents(for syntax: Syntax) -> [String] {
@@ -321,11 +325,11 @@ private func nominalPathComponents(for type: TypeSyntax) -> [String]? {
         return nominalPathComponents(for: element.type)
     }
     if let identifier = type.as(IdentifierTypeSyntax.self) {
-        return [identifier.name.text]
+        return [unescapedIdentifier(identifier.name.text)]
     }
     if let member = type.as(MemberTypeSyntax.self),
        let baseComponents = nominalPathComponents(for: member.baseType) {
-        return baseComponents + [member.name.text]
+        return baseComponents + [unescapedIdentifier(member.name.text)]
     }
     return nil
 }

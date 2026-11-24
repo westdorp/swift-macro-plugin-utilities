@@ -30,6 +30,11 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
     if normalized == expectedTypeName {
         return true
     }
+    if swiftOptionalWrappedType(type) != nil,
+       normalizedTokenText(type) == expectedTypeName
+        || qualifiedNominalMatches(type, expected: expectedTypeName) {
+        return true
+    }
     return qualifiedTypeMatches(type, expected: expectedTypeName)
 }
 
@@ -141,19 +146,24 @@ private func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
         return wrappedType
     }
 
-    if let memberType = type.as(MemberTypeSyntax.self),
-       memberType.name.text == "Optional",
-       let baseIdentifier = memberType.baseType.as(IdentifierTypeSyntax.self),
-       baseIdentifier.name.text == "Swift",
-       baseIdentifier.genericArgumentClause == nil,
-       let arguments = memberType.genericArgumentClause?.arguments,
-       arguments.count == 1,
-       let argument = arguments.first,
-       case .type(let wrappedType) = argument.argument {
-        return wrappedType
+    return swiftOptionalWrappedType(type)
+}
+
+private func swiftOptionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
+    guard let memberType = type.as(MemberTypeSyntax.self),
+          memberType.name.text == "Optional",
+          let baseIdentifier = memberType.baseType.as(IdentifierTypeSyntax.self),
+          baseIdentifier.name.text == "Swift",
+          baseIdentifier.genericArgumentClause == nil,
+          let arguments = memberType.genericArgumentClause?.arguments,
+          arguments.count == 1,
+          let argument = arguments.first,
+          case .type(let wrappedType) = argument.argument
+    else {
+        return nil
     }
 
-    return nil
+    return wrappedType
 }
 
 private func isNominalChain(_ type: TypeSyntax) -> Bool {

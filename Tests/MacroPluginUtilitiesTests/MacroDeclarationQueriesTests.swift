@@ -54,6 +54,8 @@ struct MacroDeclarationQueriesTests {
             ("(any Swift.Error)?", "Error?"),
             ("Optional<Error>", "Error?"),
             ("Swift.Optional<Error>", "Error?"),
+            ("Swift.Optional<Error>", "Swift.Optional<Error>"),
+            ("Swift.Optional<Error>", "Optional<Error>"),
             ("Swift.Optional<Swift.Error>", "Error?"),
             ("Optional<any Error>", "Error?"),
             ("AVPlayer.TimeControlStatus", "AVPlayer.TimeControlStatus"),

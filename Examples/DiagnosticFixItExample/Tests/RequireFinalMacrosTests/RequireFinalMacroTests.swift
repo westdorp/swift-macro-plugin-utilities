@@ -75,6 +75,14 @@ struct RequireFinalMacroTests {
                 "@RequireFinal\nclass Session {\n    enum Scope {\n        class Session {}\n        class Child: Session {}\n    }\n}\n",
                 "@RequireFinal\nfinal class Session {\n    enum Scope {\n        class Session {}\n        class Child: Session {}\n    }\n}\n"
             ),
+            (
+                "@RequireFinal\nclass Session {\n    class Session {}\n    class Child: Session {}\n}\n",
+                "@RequireFinal\nfinal class Session {\n    class Session {}\n    class Child: Session {}\n}\n"
+            ),
+            (
+                "enum Outer {\n    class Session {}\n    func example() {\n        @RequireFinal\n        class Session {\n            class Child: Outer.Session {}\n        }\n        _ = Session()\n    }\n}\n",
+                "enum Outer {\n    class Session {}\n    func example() {\n        @RequireFinal\n        final class Session {\n            class Child: Outer.Session {}\n        }\n        _ = Session()\n    }\n}\n"
+            ),
         ]
     )
     func nonFinalClassEmitsStructuredDiagnosticAndFixIt(
@@ -220,6 +228,37 @@ struct RequireFinalMacroTests {
             @RequireFinal
             class Session {
                 class Child: (Session) {}
+            }
+            """,
+            """
+            @RequireFinal
+            class `Session` {
+                class Child: Session {}
+            }
+            """,
+            """
+            @RequireFinal
+            class Session {
+                class Child: `Session` {}
+            }
+            """,
+            """
+            @RequireFinal
+            class Session {
+                enum Scope {
+                    #if os(Linux)
+                    class Session {}
+                    #else
+                    class Child: Session {}
+                    #endif
+                }
+            }
+            """,
+            """
+            @RequireFinal
+            class Session {
+                class Session {}
+                class Child: ExampleModule.Session {}
             }
             """,
         ]
