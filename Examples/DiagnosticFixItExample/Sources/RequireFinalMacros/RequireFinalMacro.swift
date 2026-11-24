@@ -81,7 +81,7 @@ public struct RequireFinalMacro: PeerMacro {
                 id: RequireFinalDiagnosticID.missingFinal,
                 what: "@RequireFinal requires a final class.",
                 why: "Subclasses would bypass the type's invariants.",
-                how: "Add the 'final' modifier to this class declaration.",
+                how: "Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
                 fixIts: [fixIt]
             )
             return []

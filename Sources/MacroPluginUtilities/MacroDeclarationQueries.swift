@@ -102,10 +102,164 @@ private func qualifiedMetatypeMatches(
         return false
     }
     let remainingExpected = String(expected.dropLast(suffix.count))
-    if let nestedMetatype = metatype.baseType.as(MetatypeTypeSyntax.self) {
-        return qualifiedMetatypeMatches(nestedMetatype, expected: remainingExpected)
+    return qualifiedMetatypeBaseMatches(metatype.baseType, expected: remainingExpected)
+}
+
+private func qualifiedMetatypeBaseMatches(_ base: TypeSyntax, expected: String) -> Bool {
+    let unwrappedBase = unwrapGrouping(base)
+    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(expected)
+
+    if let someOrAnyType = unwrappedBase.as(SomeOrAnyTypeSyntax.self),
+       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
+        guard expectedHadParentheses,
+              let constraintExpected = strippingLeadingAnyKeyword(from: unwrappedExpected)
+        else {
+            return false
+        }
+        return qualifiedMetatypeBaseMatches(someOrAnyType.constraint, expected: constraintExpected)
     }
-    return qualifiedNominalMatches(metatype.baseType, expected: remainingExpected)
+
+    if (expectedHadParentheses || isPostfixAtomic(unwrappedBase)),
+       normalizedTypeText(unwrappedBase) == unwrappedExpected {
+        return true
+    }
+
+    if let nestedMetatype = unwrappedBase.as(MetatypeTypeSyntax.self) {
+        return qualifiedMetatypeMatches(nestedMetatype, expected: unwrappedExpected)
+    }
+
+    if let optionalType = unwrappedBase.as(OptionalTypeSyntax.self) {
+        guard unwrappedExpected.hasSuffix("?"),
+              isPostfixAtomic(unwrapGroupingAndAny(optionalType.wrappedType))
+        else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            optionalType.wrappedType,
+            expected: String(unwrappedExpected.dropLast())
+        )
+    }
+
+    if let wrappedType = optionalWrappedType(unwrappedBase) {
+        if qualifiedNominalMatches(unwrappedBase, expected: unwrappedExpected) {
+            return true
+        }
+        guard unwrappedExpected.hasSuffix("?"),
+              isPostfixAtomic(unwrapGroupingAndAny(wrappedType))
+        else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            wrappedType,
+            expected: String(unwrappedExpected.dropLast())
+        )
+    }
+
+    if let iuoType = unwrappedBase.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+        guard unwrappedExpected.hasSuffix("!"),
+              isPostfixAtomic(unwrapGroupingAndAny(iuoType.wrappedType))
+        else {
+            return false
+        }
+        return qualifiedTypeMatches(
+            iuoType.wrappedType,
+            expected: String(unwrappedExpected.dropLast())
+        )
+    }
+
+    return qualifiedNominalMatches(unwrappedBase, expected: unwrappedExpected)
+}
+
+private func unwrapGrouping(_ type: TypeSyntax) -> TypeSyntax {
+    if let tupleType = type.as(TupleTypeSyntax.self),
+       tupleType.elements.count == 1,
+       let element = tupleType.elements.first,
+       element.firstName == nil {
+        return unwrapGrouping(element.type)
+    }
+
+    return type
+}
+
+private func strippingLeadingAnyKeyword(from text: String) -> String? {
+    guard text.hasPrefix("any") else {
+        return nil
+    }
+    let afterAny = text.dropFirst(3)
+    guard let firstAfterAny = afterAny.first, firstAfterAny.isWhitespace else {
+        return nil
+    }
+    let remainder = trimmedWhitespace(afterAny)
+    return remainder.isEmpty ? nil : remainder
+}
+
+private func stripBalancedOuterParentheses(_ text: String) -> (inner: String, hadParentheses: Bool) {
+    var current = trimmedWhitespace(text[...])
+    var strippedAny = false
+
+    while let inner = stripOneBalancedOuterParentheses(current) {
+        current = inner
+        strippedAny = true
+    }
+
+    return (current, strippedAny)
+}
+
+private func stripOneBalancedOuterParentheses(_ text: String) -> String? {
+    guard text.first == "(", text.last == ")" else {
+        return nil
+    }
+
+    var parenDepth = 0
+    var angleDepth = 0
+    var bracketDepth = 0
+    var index = text.startIndex
+    let lastIndex = text.index(before: text.endIndex)
+
+    while index < text.endIndex {
+        let character = text[index]
+        let nextIndex = text.index(after: index)
+
+        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
+            index = text.index(after: nextIndex)
+            continue
+        }
+
+        switch character {
+        case "(":
+            parenDepth += 1
+        case ")":
+            parenDepth -= 1
+            if parenDepth < 0 { return nil }
+            if parenDepth == 0 && index != lastIndex {
+                return nil
+            }
+        case "<":
+            angleDepth += 1
+        case ">":
+            angleDepth -= 1
+            if angleDepth < 0 { return nil }
+        case "[":
+            bracketDepth += 1
+        case "]":
+            bracketDepth -= 1
+            if bracketDepth < 0 { return nil }
+        case "," where parenDepth == 1 && angleDepth == 0 && bracketDepth == 0:
+            return nil
+        default:
+            break
+        }
+
+        index = nextIndex
+    }
+
+    guard parenDepth == 0, angleDepth == 0, bracketDepth == 0 else {
+        return nil
+    }
+
+    let innerStart = text.index(after: text.startIndex)
+    let inner = trimmedWhitespace(text[innerStart..<lastIndex])
+    return inner.isEmpty ? nil : inner
 }
 
 private struct NominalASTSegment {
@@ -127,6 +281,11 @@ private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bo
         return false
     }
 
+    let droppedPrefixCount = astSegments.count - expectedSegments.count
+    guard astSegments.prefix(droppedPrefixCount).allSatisfy({ $0.genericClause == nil }) else {
+        return false
+    }
+
     for (astSegment, expectedSegment) in zip(astSegments.suffix(expectedSegments.count), expectedSegments) {
         guard astSegment.name == expectedSegment.name else {
             return false
@@ -144,10 +303,15 @@ private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bo
                 return false
             }
             for (astArgument, expectedArgument) in zip(clause.arguments, expectedArguments) {
-                guard case .type(let argumentType) = astArgument.argument,
-                      typeMatches(argumentType, expectedTypeName: expectedArgument)
-                else {
-                    return false
+                switch astArgument.argument {
+                case .type(let argumentType):
+                    guard typeMatches(argumentType, expectedTypeName: expectedArgument) else {
+                        return false
+                    }
+                case .expr(let argumentExpr):
+                    guard normalizedTokenText(argumentExpr) == expectedArgument else {
+                        return false
+                    }
                 }
             }
         default:

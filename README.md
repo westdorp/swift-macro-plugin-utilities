@@ -52,7 +52,7 @@ let package = Package(
 
 If another dependency already exposes `MacroPluginUtilities`, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` and write `import PluginUtilities` in your macro target.
 
-In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) accepts already-`final` classes without a diagnostic, diagnoses non-class declarations, `open` classes, classes with `open` members, and classes with nested or local classes without offering a fix-it, and for eligible non-final classes emits one structured diagnostic with a deterministic fix-it:
+In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) accepts already-`final` classes without a diagnostic, diagnoses non-class declarations, `open` classes, classes with `open` members, and classes with nested or local classes without offering a fix-it, and for other non-final classes emits one structured diagnostic with a deterministic fix-it (syntactic macro expansion inspects only the attached class body, so confirm no sibling or cross-file subclasses exist before applying the fix-it):
 
 ```swift
 let fixIt = makeAddFinalFixIt(
@@ -65,7 +65,7 @@ context.diagnose(
     id: RequireFinalDiagnosticID.missingFinal,
     what: "@RequireFinal requires a final class.",
     why: "Subclasses would bypass the type's invariants.",
-    how: "Add the 'final' modifier to this class declaration.",
+    how: "Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.",
     fixIts: [fixIt]
 )
 return []
@@ -76,7 +76,7 @@ return []
 Attaching `@RequireFinal` to `class Session {}` produces:
 
 ```text
-error: WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Add the 'final' modifier to this class declaration.
+error: WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration.
 fix-it: Add 'final' modifier -> final class Session {}
 ```
 

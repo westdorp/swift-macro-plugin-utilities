@@ -87,7 +87,7 @@ struct RequireFinalMacroTests {
         #expect(diagnostic.diagMessage.severity == .error)
         #expect(
             diagnostic.message
-                == "WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Add the 'final' modifier to this class declaration."
+                == "WHAT: @RequireFinal requires a final class. WHY: Subclasses would bypass the type's invariants. HOW: Confirm no external declaration subclasses this type, then add the 'final' modifier to this class declaration."
         )
         #expect(diagnostic.fixIts.count == 1)
 
