@@ -78,11 +78,12 @@ private func isQualificationMatchable(_ type: TypeSyntax) -> Bool {
 
 /// Renders a type in the canonical spelling used by expected-type tables:
 /// optionals as `?`, `any` markers dropped, single-element parentheses
-/// unwrapped, non-boundary whitespace removed. Adjacent word tokens keep a
-/// separating space so opaque and ownership keywords remain distinct.
+/// unwrapped when precedence allows, non-boundary whitespace removed. Adjacent
+/// word tokens keep a separating space so opaque and ownership keywords remain
+/// distinct.
 private func normalizedTypeText(_ type: TypeSyntax) -> String {
     if let optionalType = type.as(OptionalTypeSyntax.self) {
-        return normalizedTypeText(optionalType.wrappedType) + "?"
+        return normalizedPostfixBaseText(optionalType.wrappedType) + "?"
     }
 
     if let identifierType = type.as(IdentifierTypeSyntax.self),
@@ -91,7 +92,7 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
        arguments.count == 1,
        let argument = arguments.first,
        case .type(let wrappedType) = argument.argument {
-        return normalizedTypeText(wrappedType) + "?"
+        return normalizedPostfixBaseText(wrappedType) + "?"
     }
 
     if let tupleType = type.as(TupleTypeSyntax.self),
@@ -107,34 +108,67 @@ private func normalizedTypeText(_ type: TypeSyntax) -> String {
     }
 
     if let metatype = type.as(MetatypeTypeSyntax.self) {
-        return normalizedTypeText(metatype.baseType) + "." + metatype.metatypeSpecifier.text
+        return normalizedPostfixBaseText(metatype.baseType) + "." + metatype.metatypeSpecifier.text
     }
 
     return normalizedTokenText(type)
 }
 
+private func normalizedPostfixBaseText(_ base: TypeSyntax) -> String {
+    let rendered = normalizedTypeText(base)
+    return isPostfixAtomic(unwrapGroupingAndAny(base)) ? rendered : "(\(rendered))"
+}
+
+private func unwrapGroupingAndAny(_ type: TypeSyntax) -> TypeSyntax {
+    if let tupleType = type.as(TupleTypeSyntax.self),
+       tupleType.elements.count == 1,
+       let element = tupleType.elements.first,
+       element.firstName == nil {
+        return unwrapGroupingAndAny(element.type)
+    }
+
+    if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
+       someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
+        return unwrapGroupingAndAny(someOrAnyType.constraint)
+    }
+
+    return type
+}
+
+private func isPostfixAtomic(_ type: TypeSyntax) -> Bool {
+    type.is(IdentifierTypeSyntax.self)
+        || type.is(MemberTypeSyntax.self)
+        || type.is(ArrayTypeSyntax.self)
+        || type.is(DictionaryTypeSyntax.self)
+        || type.is(OptionalTypeSyntax.self)
+        || type.is(ImplicitlyUnwrappedOptionalTypeSyntax.self)
+        || type.is(MetatypeTypeSyntax.self)
+        || type.is(TupleTypeSyntax.self)
+}
+
 private func normalizedTokenText(_ node: some SyntaxProtocol) -> String {
     var result = ""
-    var previousEndedWithWord = false
+    var previousWasWordToken = false
 
     for token in node.tokens(viewMode: .sourceAccurate) {
-        let text = token.text
-        guard let first = text.first, let last = text.last else {
-            continue
-        }
-        let startsWithWord = isTypeWordCharacter(first)
-        if previousEndedWithWord && startsWithWord {
+        let isWordToken = isTypeWordToken(token.tokenKind)
+        if previousWasWordToken && isWordToken {
             result.append(" ")
         }
-        result.append(text)
-        previousEndedWithWord = isTypeWordCharacter(last)
+        result.append(token.text)
+        previousWasWordToken = isWordToken
     }
 
     return result
 }
 
-private func isTypeWordCharacter(_ character: Character) -> Bool {
-    character.isLetter || character.isNumber || character == "_" || character == "`"
+private func isTypeWordToken(_ kind: TokenKind) -> Bool {
+    switch kind {
+    case .identifier, .keyword, .wildcard, .dollarIdentifier, .integerLiteral, .floatLiteral:
+        true
+    default:
+        false
+    }
 }
 
 /// Returns whether a variable declaration is an instance property.

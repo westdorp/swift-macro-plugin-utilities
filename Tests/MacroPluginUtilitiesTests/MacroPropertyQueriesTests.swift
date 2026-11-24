@@ -156,6 +156,8 @@ struct MacroPropertyQueriesTests {
         arguments: [
             ("init(value: Swift.Int.Type) {}", "Int.Type", true),
             ("init(value: Int.Type) {}", "Int.Type", true),
+            ("init(value: ((Int) -> Swift.Int).Type) {}", "(Int)->Swift.Int.Type", false),
+            ("init(value: some 🐱) {}", "some🐱", false),
             ("init(value: Box<some Probe>) {}", "Box<someProbe>", false),
             ("init(value: borrowing some Probe) {}", "borrowingsomeProbe", false),
         ]

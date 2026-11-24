@@ -23,6 +23,8 @@ swift-network-extension-macros        (@ProviderConfiguration, @TunnelStateMachi
 Requires Swift 6.2 or later on macOS 13 or later. Add `import CompilerPluginSupport`, both package dependencies, and the macro and library targets to `Package.swift` (see [`Examples/DiagnosticFixItExample/Package.swift`](Examples/DiagnosticFixItExample/Package.swift)):
 
 ```swift
+// swift-tools-version: 6.2
+
 import CompilerPluginSupport
 import PackageDescription
 
@@ -50,7 +52,7 @@ let package = Package(
 
 If another dependency already exposes `MacroPluginUtilities`, pass `moduleAliases: ["MacroPluginUtilities": "PluginUtilities"]` on `.product(...)` and write `import PluginUtilities` in your macro target.
 
-In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), after rejecting non-class declarations, `open` classes, already-`final` classes, and classes with `open` members, [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) emits one structured diagnostic with a deterministic fix-it:
+In [`Examples/DiagnosticFixItExample`](Examples/DiagnosticFixItExample), [`RequireFinalMacro.swift`](Examples/DiagnosticFixItExample/Sources/RequireFinalMacros/RequireFinalMacro.swift) accepts already-`final` classes without a diagnostic, diagnoses non-class declarations, `open` classes, and classes with `open` members, and for eligible non-final classes emits one structured diagnostic with a deterministic fix-it:
 
 ```swift
 let fixIt = makeAddFinalFixIt(
