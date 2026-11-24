@@ -13,11 +13,19 @@
   check. Specialized enclosing segments such as `Outer<Int>.Item` no longer
   match `Item`, and metatype suffixes such as `Swift.Int.Type` /
   `Swift.Int.Protocol` no longer match bare `Type` / `Protocol`.
+- Optional and implicitly unwrapped optional wrappers of non-postfix-atomic
+  types (function types, protocol compositions, and opaque `some` types) now
+  preserve grouping parentheses rather than unwrapping them. Expected strings
+  using `?` or `!` sugar must retain those parentheses (for example
+  `(()->Void)?` and `(Equatable&Sendable)?` instead of `()->Void?` and
+  `Equatable&Sendable?`).
 - Optional spellings (`T?`, `Optional<T>`, and `Swift.Optional<T>`) now match
   symmetrically in both directions, while other module-qualified types named
-  `Optional` (such as `MyModule.Optional<Int>`) no longer match unqualified
-  `Optional<Int>` or `Int?`.
+  `Optional` (such as `MyModule.Optional<Int>` and
+  `Namespace.Swift.Optional<Int>`) no longer match unqualified `Optional<Int>`,
+  `Swift.Optional<Int>`, or `Int?`.
 - Qualified protocol compositions (`any Swift.Equatable & Swift.Sendable`),
+  array and dictionary element types (`[Swift.Int]`, `[Swift.String: Swift.Int?]`),
   parenthesized metatype bases (`(Swift.Int).Type`, `(any Swift.Error).Type`),
   and Swift 6.2 value generic arguments (`Swift.InlineArray<4, Swift.Int>`) now
   match structurally.
@@ -94,7 +102,7 @@ visibility, not an endorsed authoring path.
 All other `0.1.0` APIs remain source-compatible; the remaining `0.2.0`
 utilities are additive.
 
-## Playback vendored-module users
+## Vendored-module users
 
 ### Adopt the canonical package
 
@@ -108,7 +116,7 @@ Add the exact package dependency:
 ```
 
 Add the `MacroPluginUtilities` product to each consuming macro target. Delete
-the local utility target, its six vendored source files, and its utility test
+the local utility target, its vendored source files, and its utility test
 target only after their unique tests are present upstream.
 
 ### Remove optional fix-it adaptation
@@ -125,13 +133,12 @@ with:
 [makeAddFinalFixIt(...)]
 ```
 
-Apply the same rewrite to `makeAddMainActorFixIt`. Playback currently has four
-such adaptations across its validator and machine validation.
+Apply the same rewrite to `makeAddMainActorFixIt`.
 
 ### Keep diagnostic IDs consumer-owned
 
 Preserve consumer-owned typed diagnostic enums and pass their cases directly
-to the generic context convenience. Do not move playback-specific ID cases
+to the generic context convenience. Do not move consumer-specific ID cases
 into `MacroPluginUtilities`.
 
 ### Account for inherited behavior changes

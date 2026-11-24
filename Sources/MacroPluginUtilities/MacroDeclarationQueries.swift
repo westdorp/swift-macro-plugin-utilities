@@ -31,19 +31,21 @@ public func typeMatches(_ type: TypeSyntax, expectedTypeName: String) -> Bool {
 }
 
 private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool {
-    guard !expected.isEmpty else {
+    let trimmedExpected = trimmedWhitespace(expected[...])
+    guard !trimmedExpected.isEmpty else {
         return false
     }
 
-    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(expected)
+    let (unwrappedExpected, expectedHadParentheses) = stripBalancedOuterParentheses(trimmedExpected)
     if expectedHadParentheses {
         return typeMatches(type, expectedTypeName: unwrappedExpected)
     }
 
-    if !expected.hasSuffix("?"),
-       !expected.hasSuffix("!"),
-       let constraintExpected = strippingLeadingAnyKeyword(from: expected) {
-        guard strippingLeadingAnyKeyword(from: constraintExpected) == nil else {
+    if !trimmedExpected.hasSuffix("?"),
+       !trimmedExpected.hasSuffix("!"),
+       let constraintExpected = strippingLeadingAnyKeyword(from: trimmedExpected) {
+        let (unwrappedConstraint, _) = stripBalancedOuterParentheses(constraintExpected)
+        guard strippingLeadingAnyKeyword(from: unwrappedConstraint) == nil else {
             return false
         }
         return typeMatches(type, expectedTypeName: constraintExpected)
@@ -52,19 +54,19 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
     if let optionalType = type.as(OptionalTypeSyntax.self) {
         return qualifiedOptionalMatches(
             wrappedType: optionalType.wrappedType,
-            expected: expected
+            expected: trimmedExpected
         )
     }
 
     if let wrappedType = optionalWrappedType(type) {
-        return qualifiedNominalMatches(type, expected: expected)
-            || qualifiedOptionalMatches(wrappedType: wrappedType, expected: expected)
+        return qualifiedNominalMatches(type, expected: trimmedExpected)
+            || qualifiedOptionalMatches(wrappedType: wrappedType, expected: trimmedExpected)
     }
 
     if let iuoType = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
         return qualifiedImplicitlyUnwrappedOptionalMatches(
             wrappedType: iuoType.wrappedType,
-            expected: expected
+            expected: trimmedExpected
         )
     }
 
@@ -72,23 +74,112 @@ private func qualifiedTypeMatches(_ type: TypeSyntax, expected: String) -> Bool 
        tupleType.elements.count == 1,
        let element = tupleType.elements.first,
        element.firstName == nil {
-        return qualifiedTypeMatches(element.type, expected: expected)
+        return qualifiedTypeMatches(element.type, expected: trimmedExpected)
     }
 
     if let someOrAnyType = type.as(SomeOrAnyTypeSyntax.self),
        someOrAnyType.someOrAnySpecifier.tokenKind == .keyword(.any) {
-        return qualifiedTypeMatches(someOrAnyType.constraint, expected: expected)
+        return qualifiedTypeMatches(someOrAnyType.constraint, expected: trimmedExpected)
     }
 
     if let composition = type.as(CompositionTypeSyntax.self) {
-        return qualifiedCompositionMatches(composition, expected: expected)
+        return qualifiedCompositionMatches(composition, expected: trimmedExpected)
+    }
+
+    if let arrayType = type.as(ArrayTypeSyntax.self) {
+        return qualifiedArrayMatches(arrayType, expected: trimmedExpected)
+    }
+
+    if let dictionaryType = type.as(DictionaryTypeSyntax.self) {
+        return qualifiedDictionaryMatches(dictionaryType, expected: trimmedExpected)
     }
 
     if let metatype = type.as(MetatypeTypeSyntax.self) {
-        return qualifiedMetatypeMatches(metatype, expected: expected)
+        return qualifiedMetatypeMatches(metatype, expected: trimmedExpected)
     }
 
-    return qualifiedNominalMatches(type, expected: expected)
+    return qualifiedNominalMatches(type, expected: trimmedExpected)
+}
+
+private func qualifiedArrayMatches(_ arrayType: ArrayTypeSyntax, expected: String) -> Bool {
+    guard let inner = stripBalancedOuterBrackets(expected),
+          let colonParts = splitTopLevel(inner, separator: ":"),
+          colonParts.count == 1
+    else {
+        return false
+    }
+
+    return typeMatches(arrayType.element, expectedTypeName: inner)
+}
+
+private func qualifiedDictionaryMatches(
+    _ dictionaryType: DictionaryTypeSyntax,
+    expected: String
+) -> Bool {
+    guard let inner = stripBalancedOuterBrackets(expected),
+          let parts = splitTopLevel(inner, separator: ":"),
+          parts.count == 2
+    else {
+        return false
+    }
+
+    return typeMatches(dictionaryType.key, expectedTypeName: parts[0])
+        && typeMatches(dictionaryType.value, expectedTypeName: parts[1])
+}
+
+private func stripBalancedOuterBrackets(_ text: String) -> String? {
+    guard text.first == "[", text.last == "]" else {
+        return nil
+    }
+
+    var parenDepth = 0
+    var angleDepth = 0
+    var bracketDepth = 0
+    var index = text.startIndex
+    let lastIndex = text.index(before: text.endIndex)
+
+    while index < text.endIndex {
+        let character = text[index]
+        let nextIndex = text.index(after: index)
+
+        if character == "-", nextIndex < text.endIndex, text[nextIndex] == ">" {
+            index = text.index(after: nextIndex)
+            continue
+        }
+
+        switch character {
+        case "[":
+            bracketDepth += 1
+        case "]":
+            bracketDepth -= 1
+            if bracketDepth < 0 { return nil }
+            if bracketDepth == 0 && index != lastIndex {
+                return nil
+            }
+        case "(":
+            parenDepth += 1
+        case ")":
+            parenDepth -= 1
+            if parenDepth < 0 { return nil }
+        case "<":
+            angleDepth += 1
+        case ">":
+            angleDepth -= 1
+            if angleDepth < 0 { return nil }
+        default:
+            break
+        }
+
+        index = nextIndex
+    }
+
+    guard parenDepth == 0, angleDepth == 0, bracketDepth == 0 else {
+        return nil
+    }
+
+    let innerStart = text.index(after: text.startIndex)
+    let inner = trimmedWhitespace(text[innerStart..<lastIndex])
+    return inner.isEmpty ? nil : inner
 }
 
 private func qualifiedOptionalMatches(
@@ -110,16 +201,11 @@ private func qualifiedOptionalMatches(
     return typeMatches(wrappedType, expectedTypeName: unwrappedExpected)
 }
 
-private func expectedOptionalWrapped(_ expected: String) -> (wrapped: String, isSugar: Bool)? {
-    if expected.hasSuffix("?") {
-        let wrapped = String(expected.dropLast())
-        return wrapped.isEmpty ? nil : (wrapped, true)
-    }
+private func isStandardOptionalNominalSegments(_ segments: [ExpectedNominalSegment]) -> Bool {
+    standardOptionalWrappedArgument(from: segments) != nil
+}
 
-    guard let segments = parseExpectedNominalSegments(expected) else {
-        return nil
-    }
-
+private func standardOptionalWrappedArgument(from segments: [ExpectedNominalSegment]) -> String? {
     let genericBody: String?
     switch segments.count {
     case 1 where segments[0].name == "Optional":
@@ -136,6 +222,21 @@ private func expectedOptionalWrapped(_ expected: String) -> (wrapped: String, is
           let arguments = splitTopLevel(genericBody, separator: ","),
           arguments.count == 1,
           let wrapped = arguments.first
+    else {
+        return nil
+    }
+
+    return wrapped
+}
+
+private func expectedOptionalWrapped(_ expected: String) -> (wrapped: String, isSugar: Bool)? {
+    if expected.hasSuffix("?") {
+        let wrapped = String(expected.dropLast())
+        return wrapped.isEmpty ? nil : (wrapped, true)
+    }
+
+    guard let segments = parseExpectedNominalSegments(expected),
+          let wrapped = standardOptionalWrappedArgument(from: segments)
     else {
         return nil
     }
@@ -245,6 +346,14 @@ private func qualifiedMetatypeBaseMatches(_ base: TypeSyntax, expected: String) 
             wrappedType: iuoType.wrappedType,
             expected: unwrappedExpected
         )
+    }
+
+    if let arrayType = unwrappedBase.as(ArrayTypeSyntax.self) {
+        return qualifiedArrayMatches(arrayType, expected: unwrappedExpected)
+    }
+
+    if let dictionaryType = unwrappedBase.as(DictionaryTypeSyntax.self) {
+        return qualifiedDictionaryMatches(dictionaryType, expected: unwrappedExpected)
     }
 
     return qualifiedNominalMatches(unwrappedBase, expected: unwrappedExpected)
@@ -366,11 +475,7 @@ private func qualifiedNominalMatches(_ type: TypeSyntax, expected: String) -> Bo
         return false
     }
 
-    if expectedSegments.count == 1,
-       expectedSegments[0].name == "Optional",
-       let genericBody = expectedSegments[0].genericBody,
-       let expectedArgs = splitTopLevel(genericBody, separator: ","),
-       expectedArgs.count == 1,
+    if isStandardOptionalNominalSegments(expectedSegments),
        optionalWrappedType(type) == nil {
         return false
     }
