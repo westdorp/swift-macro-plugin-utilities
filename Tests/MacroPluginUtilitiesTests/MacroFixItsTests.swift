@@ -69,6 +69,7 @@ struct MacroFixItsTests {
     func addFinalPreservesTriviaAfterMultilineModifiers(source: String, expected: String) throws {
         let tree = Parser.parse(source: source)
         #expect(!tree.hasError)
+        #expect(tree.totalLength.utf8Length == source.utf8.count)
         let classDecl = try #require(tree.firstClass)
 
         let fixIt = makeAddFinalFixIt(
@@ -145,6 +146,7 @@ struct MacroFixItsTests {
         for (source, fixed) in cases {
             let tree = Parser.parse(source: source)
             #expect(!tree.hasError)
+            #expect(tree.totalLength.utf8Length == source.utf8.count)
             let classDecl = try #require(tree.firstClass)
             let fixIt = makeAddMainActorFixIt(
                 for: classDecl,
@@ -207,6 +209,7 @@ struct MacroFixItsTests {
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
     let sourceFile = Parser.parse(source: source)
     #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     return try #require(
         sourceFile
             .statements.first?

@@ -246,6 +246,7 @@ private func assertValidTypeFixture(_ source: String) {
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
     let sourceFile = Parser.parse(source: source)
     #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     return try #require(
         sourceFile
             .statements.first?

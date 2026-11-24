@@ -315,6 +315,7 @@ private let trackerRequirements = MacroAttachedClassRequirements(
 private func parseClass(_ source: String) throws -> ClassDeclSyntax {
     let sourceFile = Parser.parse(source: source)
     #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     return try #require(
         sourceFile.statements.compactMap { $0.item.as(ClassDeclSyntax.self) }.first
     )
@@ -322,6 +323,8 @@ private func parseClass(_ source: String) throws -> ClassDeclSyntax {
 
 private func parseStruct(_ source: String) throws -> StructDeclSyntax {
     let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     return try #require(
         sourceFile.statements.compactMap { $0.item.as(StructDeclSyntax.self) }.first
     )

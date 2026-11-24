@@ -361,8 +361,8 @@ struct MacroDeclarationQueriesTests {
         #expect(!typeMatches(parseType("some Error"), expectedTypeName: "Error"))
     }
 
-    @Test("Deeply nested Optional and composition trees stay linear")
-    func deeplyNestedOptionalAndCompositionTreesStayLinear() {
+    @Test("Deeply nested Optional and composition trees match structurally")
+    func deeplyNestedOptionalAndCompositionTreesMatchStructurally() {
         let depth = 24
         let actualOptional = String(repeating: "Optional<", count: depth) + "Int" + String(repeating: ">", count: depth)
         let expectedOptional = String(repeating: "Optional<", count: depth) + "String" + String(repeating: ">", count: depth)
@@ -501,8 +501,8 @@ struct MacroDeclarationQueriesTests {
     @Test("Collects every source member namespace")
     func collectsCompleteMemberNames() throws {
         let declaration = try #require(
-            Parser.parse(
-                source: """
+            parseDeclaration(
+                """
                 enum Surface {
                     case idle, active
                     let primary, secondary: Int
@@ -515,8 +515,7 @@ struct MacroDeclarationQueriesTests {
                     typealias Alias = Int
                 }
                 """
-            )
-            .statements.first?.item.as(EnumDeclSyntax.self)
+            )?.as(EnumDeclSyntax.self)
         )
 
         #expect(
@@ -539,16 +538,15 @@ struct MacroDeclarationQueriesTests {
     @Test("Renders payload labels through one enum case pattern boundary")
     func rendersEnumCasePatterns() throws {
         let declaration = try #require(
-            Parser.parse(
-                source: """
+            parseDeclaration(
+                """
                 enum Event {
                     case idle
                     case loaded(String)
                     case progress(seconds: Double, _ marker: Int)
                 }
                 """
-            )
-            .statements.first?.item.as(EnumDeclSyntax.self)
+            )?.as(EnumDeclSyntax.self)
         )
         let elements = declaration.memberBlock.members
             .compactMap { $0.decl.as(EnumCaseDeclSyntax.self) }
@@ -590,7 +588,10 @@ private func parseAttributes(_ source: String) -> AttributeListSyntax? {
 }
 
 private func parseDeclaration(_ source: String) -> DeclSyntax? {
-    Parser.parse(source: source).statements.first?.item.as(DeclSyntax.self)
+    let sourceFile = Parser.parse(source: source)
+    #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
+    return sourceFile.statements.first?.item.as(DeclSyntax.self)
 }
 
 private func parseType(_ source: String) -> TypeSyntax {

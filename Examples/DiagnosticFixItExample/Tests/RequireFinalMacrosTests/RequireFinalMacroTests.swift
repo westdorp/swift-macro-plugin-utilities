@@ -305,9 +305,11 @@ struct RequireFinalMacroTests {
 
     @Test("Fix-it applier rejects an edit anchored to an unregistered syntax tree")
     func fixItApplierRejectsUnmappedAnchor() throws {
-        let result = expand("@RequireFinal\nclass Session {}\n")
-        let unmappedTree = Parser.parse(source: "@RequireFinal\nclass Session {}\n")
+        let source = "@RequireFinal\nclass Session {}\n"
+        let result = expand(source)
+        let unmappedTree = Parser.parse(source: source)
         #expect(!unmappedTree.hasError)
+        #expect(unmappedTree.totalLength.utf8Length == source.utf8.count)
         let unmappedClass = try #require(
             unmappedTree.statements.first?.item.as(ClassDeclSyntax.self)
         )
@@ -339,6 +341,7 @@ private struct ExpansionResult {
 private func expand(_ source: String) -> ExpansionResult {
     let sourceFile = Parser.parse(source: source)
     #expect(!sourceFile.hasError)
+    #expect(sourceFile.totalLength.utf8Length == source.utf8.count)
     let context = BasicMacroExpansionContext(
         sourceFiles: [
             sourceFile: .init(moduleName: "ExampleModule", fullFilePath: "Example.swift")

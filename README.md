@@ -4,7 +4,7 @@
 
 ## Package stack
 
-This package is the standalone foundation layer of the three-package stack and does not depend on the packages above it:
+This package is the standalone foundation layer of the three-package stack and has no dependency on its downstream consumers (`swift-provider-message` or `swift-network-extension-macros`):
 
 ```text
 swift-macro-plugin-utilities          (diagnostics, fix-its, syntax queries, swift-source-guardrails)
